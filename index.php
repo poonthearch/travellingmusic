@@ -486,8 +486,9 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         <td><?php
                             $lnk = trim($artist['links']);
                             if ($lnk) {
+                                $href = preg_match('#^(https?://|//|/|#|mailto:)#i', $lnk) ? $lnk : '/' . $lnk;
                                 $target = (strpos($lnk, 'http') === 0) ? ' target="_blank"' : '';
-                                echo '<a style="color:black" href="' . htmlspecialchars($lnk) . '"' . $target . '>'
+                                echo '<a style="color:black" href="' . htmlspecialchars($href) . '"' . $target . '>'
                                    . htmlspecialchars($lnk) . '</a>';
                             }
                         ?></td>
