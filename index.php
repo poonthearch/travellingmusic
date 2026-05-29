@@ -122,10 +122,15 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
             --background-opacity: 0.9;
         }
 
+        /* White sits on html so canvas (z-index:-1) stays visible above it */
+        html {
+            background: white;
+        }
+
         body {
             margin: 0;
             padding: 0;
-            background: white;
+            background: transparent;
             font-family: Arial, sans-serif;
             position: relative;
             height: 100vh;
@@ -720,58 +725,59 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
 })();
 
 // ---- player ----
-let isPlaying    = false;
-let currentMode  = null;  // 'local' | 'sc'
-let audioCtx     = null;
-let analyserNode = null;
-let freqData     = null;
-let sourceNode   = null;
-let scWidget     = null;
-let scReady      = false;
+var isPlaying    = false;
+var currentMode  = null;   // 'local' | 'sc'
+var audioCtx     = null;
+var analyserNode = null;
+var freqData     = null;
+var sourceNode   = null;
+var scWidget     = null;
 
-const audioEl   = document.getElementById('audio-player');
-const scIframe  = document.getElementById('sc-widget');
+var audioEl  = document.getElementById('audio-player');
+var scIframe = document.getElementById('sc-widget');
 
 function setupAnalyser() {
     if (audioCtx) return;
-    audioCtx     = new (window.AudioContext || window.webkitAudioContext)();
-    analyserNode = audioCtx.createAnalyser();
-    analyserNode.fftSize = 256;
-    sourceNode   = audioCtx.createMediaElementSource(audioEl);
-    sourceNode.connect(analyserNode);
-    analyserNode.connect(audioCtx.destination);
-    freqData     = new Uint8Array(analyserNode.frequencyBinCount);
-}
-
-function initSCWidget() {
-    if (scWidget) return;
-    scWidget = SC.Widget(scIframe);
-    scWidget.bind(SC.Widget.Events.READY, function() { scReady = true; });
-    scWidget.bind(SC.Widget.Events.PLAY,  function() { isPlaying = true;  updateIcon(); });
-    scWidget.bind(SC.Widget.Events.PAUSE, function() { isPlaying = false; updateIcon(); });
-    scWidget.bind(SC.Widget.Events.FINISH,function() { isPlaying = false; updateIcon(); nextTrack(); });
-    scWidget.bind(SC.Widget.Events.PLAY_PROGRESS, function(e) {
-        const bar  = document.getElementById('progress-bar');
-        const disp = document.getElementById('time-display');
-        bar.style.width = (e.relativePosition * 100) + '%';
-        const cur  = Math.floor(e.currentPosition / 1000);
-        scWidget.getDuration(function(dur) {
-            const total = Math.floor(dur / 1000);
-            disp.textContent = fmtTime(cur) + ' / ' + fmtTime(total);
-        });
-    });
+    try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        analyserNode = audioCtx.createAnalyser();
+        analyserNode.fftSize = 256;
+        sourceNode = audioCtx.createMediaElementSource(audioEl);
+        sourceNode.connect(analyserNode);
+        analyserNode.connect(audioCtx.destination);
+        freqData = new Uint8Array(analyserNode.frequencyBinCount);
+    } catch (e) {
+        console.warn('AudioContext setup failed:', e);
+        audioCtx = null;
+    }
 }
 
 function fmtTime(s) {
-    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    s = Math.floor(s);
+    return Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60);
 }
 
 // Playlist state
-const localPlaylist = [];   // {url, title, artist}
-const scPlaylist    = [];   // {url, title, artist}
-let   localIdx      = 0;
-let   scIdx         = 0;
-let   playlistMode  = 'local'; // which list prev/next operates on
+var localPlaylist = [];
+var scPlaylist    = [];
+var localIdx      = 0;
+var scIdx         = 0;
+var playlistMode  = 'local';
+
+function doPlay() {
+    var p = audioEl.play();
+    if (p !== undefined) {
+        p.then(function() {
+            isPlaying = true;
+            updateIcon();
+        }).catch(function(e) {
+            console.warn('Playback error:', e);
+        });
+    } else {
+        isPlaying = true;
+        updateIcon();
+    }
+}
 
 function playLocal(url, title, artist) {
     if (currentMode === 'sc' && scWidget) scWidget.pause();
@@ -779,59 +785,68 @@ function playLocal(url, title, artist) {
     playlistMode = 'local';
 
     setupAnalyser();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-
     audioEl.src = url;
-    audioEl.play();
-    isPlaying = true;
-    updateIcon();
+
+    // Resume AudioContext (required by browsers after first user gesture)
+    if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume().then(function() { doPlay(); });
+    } else {
+        doPlay();
+    }
+
     setNowPlaying(title, artist);
 
-    localIdx = localPlaylist.findIndex(t => t.url === url);
-    if (localIdx === -1) localIdx = 0;
+    var found = false;
+    for (var i = 0; i < localPlaylist.length; i++) {
+        if (localPlaylist[i].url === url) { localIdx = i; found = true; break; }
+    }
+    if (!found) localIdx = 0;
 }
 
 function playSC(permalinkUrl, title, artist) {
-    if (currentMode === 'local') audioEl.pause();
+    if (currentMode === 'local') { audioEl.pause(); isPlaying = false; }
     currentMode  = 'sc';
     playlistMode = 'sc';
 
-    if (!scWidget) initSCWidget();
-
-    const widgetUrl = 'https://w.soundcloud.com/player/?url=' +
+    var widgetUrl = 'https://w.soundcloud.com/player/?url=' +
         encodeURIComponent(permalinkUrl) +
         '&auto_play=true&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false';
 
     scIframe.src = widgetUrl;
 
-    // Re-bind after src change
+    // SC Widget needs time to load new src before we can bind
     setTimeout(function() {
+        if (typeof SC === 'undefined') return;
         scWidget = SC.Widget(scIframe);
-        scReady  = false;
         scWidget.bind(SC.Widget.Events.READY, function() {
-            scReady = true;
             scWidget.play();
-            isPlaying = true;
-            updateIcon();
         });
-        scWidget.bind(SC.Widget.Events.PAUSE,  function() { isPlaying = false; updateIcon(); });
-        scWidget.bind(SC.Widget.Events.FINISH, function() { isPlaying = false; updateIcon(); nextTrack(); });
+        scWidget.bind(SC.Widget.Events.PLAY, function() {
+            isPlaying = true; updateIcon();
+        });
+        scWidget.bind(SC.Widget.Events.PAUSE, function() {
+            isPlaying = false; updateIcon();
+        });
+        scWidget.bind(SC.Widget.Events.FINISH, function() {
+            isPlaying = false; updateIcon(); nextTrack();
+        });
         scWidget.bind(SC.Widget.Events.PLAY_PROGRESS, function(e) {
             document.getElementById('progress-bar').style.width = (e.relativePosition * 100) + '%';
-            const cur = Math.floor(e.currentPosition / 1000);
+            var cur = Math.floor(e.currentPosition / 1000);
             scWidget.getDuration(function(dur) {
                 document.getElementById('time-display').textContent =
                     fmtTime(cur) + ' / ' + fmtTime(Math.floor(dur / 1000));
             });
         });
-    }, 300);
+    }, 400);
 
     isPlaying = true;
     updateIcon();
     setNowPlaying(title, artist);
 
-    scIdx = scPlaylist.findIndex(t => t.url === permalinkUrl);
-    if (scIdx === -1) scIdx = 0;
+    for (var i = 0; i < scPlaylist.length; i++) {
+        if (scPlaylist[i].url === permalinkUrl) { scIdx = i; break; }
+    }
 }
 
 function setNowPlaying(title, artist) {
@@ -841,7 +856,12 @@ function setNowPlaying(title, artist) {
 
 function togglePlay() {
     if (currentMode === 'local') {
-        if (isPlaying) audioEl.pause(); else audioEl.play();
+        if (isPlaying) { audioEl.pause(); }
+        else {
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume().then(function() { doPlay(); });
+            } else { doPlay(); }
+        }
     } else if (currentMode === 'sc' && scWidget) {
         if (isPlaying) scWidget.pause(); else scWidget.play();
     }
@@ -853,8 +873,8 @@ function updateIcon() {
 }
 
 function seek(e) {
-    const rect = document.getElementById('progress-container').getBoundingClientRect();
-    const pos  = (e.clientX - rect.left) / rect.width;
+    var rect = document.getElementById('progress-container').getBoundingClientRect();
+    var pos  = (e.clientX - rect.left) / rect.width;
     if (currentMode === 'local' && audioEl.duration) {
         audioEl.currentTime = pos * audioEl.duration;
     } else if (currentMode === 'sc' && scWidget) {
@@ -864,17 +884,17 @@ function seek(e) {
 
 function previousTrack() {
     if (playlistMode === 'sc') {
-        if (scIdx > 0) { scIdx--; const t = scPlaylist[scIdx]; playSC(t.url, t.title, t.artist); }
+        if (scIdx > 0) { scIdx--; var t = scPlaylist[scIdx]; playSC(t.url, t.title, t.artist); }
     } else {
-        if (localIdx > 0) { localIdx--; const t = localPlaylist[localIdx]; playLocal(t.url, t.title, t.artist); }
+        if (localIdx > 0) { localIdx--; var t = localPlaylist[localIdx]; playLocal(t.url, t.title, t.artist); }
     }
 }
 
 function nextTrack() {
     if (playlistMode === 'sc') {
-        if (scIdx < scPlaylist.length - 1) { scIdx++; const t = scPlaylist[scIdx]; playSC(t.url, t.title, t.artist); }
+        if (scIdx < scPlaylist.length - 1) { scIdx++; var t = scPlaylist[scIdx]; playSC(t.url, t.title, t.artist); }
     } else {
-        if (localIdx < localPlaylist.length - 1) { localIdx++; const t = localPlaylist[localIdx]; playLocal(t.url, t.title, t.artist); }
+        if (localIdx < localPlaylist.length - 1) { localIdx++; var t = localPlaylist[localIdx]; playLocal(t.url, t.title, t.artist); }
     }
 }
 
@@ -920,10 +940,10 @@ function nextTrack() {
 // HTML5 audio events
 audioEl.addEventListener('timeupdate', function() {
     if (currentMode !== 'local' || !audioEl.duration) return;
-    const pct = (audioEl.currentTime / audioEl.duration) * 100;
+    var pct = (audioEl.currentTime / audioEl.duration) * 100;
     document.getElementById('progress-bar').style.width = pct + '%';
     document.getElementById('time-display').textContent =
-        fmtTime(Math.floor(audioEl.currentTime)) + ' / ' + fmtTime(Math.floor(audioEl.duration));
+        fmtTime(audioEl.currentTime) + ' / ' + fmtTime(audioEl.duration);
 });
 audioEl.addEventListener('ended',  function() { isPlaying = false; updateIcon(); nextTrack(); });
 audioEl.addEventListener('play',   function() { isPlaying = true;  updateIcon(); });
