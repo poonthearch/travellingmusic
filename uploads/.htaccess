@@ -1,0 +1,7 @@
+# Allow audio and image files only
+<FilesMatch "\.(mp3|jpeg|jpg|png|gif|webp)$">
+    Allow from all
+</FilesMatch>
+<FilesMatch "\.php$">
+    Deny from all
+</FilesMatch>

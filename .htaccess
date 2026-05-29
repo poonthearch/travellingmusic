@@ -1,0 +1,12 @@
+# Protect data directory
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^data/ - [F,L]
+</IfModule>
+
+# Increase upload limits if allowed
+<IfModule mod_php.c>
+    php_value upload_max_filesize 64M
+    php_value post_max_size 64M
+    php_value max_execution_time 120
+</IfModule>
