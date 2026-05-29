@@ -122,10 +122,8 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
             --background-opacity: 0.9;
         }
 
-        /* White sits on html so canvas (z-index:-1) stays visible above it */
-        html {
-            background: white;
-        }
+        /* White sits on html so canvas stays visible */
+        html { background: white; }
 
         body {
             margin: 0;
@@ -142,7 +140,7 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
             left: 0;
             width: 100%;
             height: 100%;
-            z-index: -1;
+            z-index: 0;
         }
 
         .container {
@@ -161,6 +159,7 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
             height: 45vh;
             display: flex;
             flex-direction: column;
+            position: relative;
             z-index: 1;
         }
 
@@ -481,18 +480,20 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($artists as $artist): ?>
+                    <?php foreach (array_merge($artists, $legacyArtists) as $artist): ?>
                     <tr>
                         <td><?php echo htmlspecialchars($artist['name']); ?></td>
-                        <td><?php echo htmlspecialchars($artist['links']); ?></td>
-                        <td><?php echo htmlspecialchars($artist['about']); ?></td>
-                    </tr>
-                    <?php endforeach; ?>
-                    <!-- Legacy artists from artists/artists.txt -->
-                    <?php foreach ($legacyArtists as $artist): ?>
-                    <tr>
-                        <td><?php echo htmlspecialchars($artist['name']); ?></td>
-                        <td><?php echo htmlspecialchars($artist['links']); ?></td>
+                        <td><?php
+                            $lnk = trim($artist['links']);
+                            if ($lnk) {
+                                // Treat as URL if it has a dot or slash, otherwise plain text
+                                $href = (strpos($lnk,'http')===0 || strpos($lnk,'/')!==false || strpos($lnk,'.')!==false)
+                                    ? $lnk : '';
+                                if ($href) echo '<a style="color:black" href="'.htmlspecialchars($href).'">'
+                                    .htmlspecialchars($lnk).'</a>';
+                                else echo htmlspecialchars($lnk);
+                            }
+                        ?></td>
                         <td><?php echo htmlspecialchars($artist['about']); ?></td>
                     </tr>
                     <?php endforeach; ?>
@@ -661,72 +662,105 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
 
 <script src="https://w.soundcloud.com/player/api.js"></script>
 <script>
-// ---- fractal background ----
-(function() {
-    const canvas = document.getElementById('fractal-canvas');
-    const ctx    = canvas.getContext('2d');
-    let animId, lastTime = 0;
-    const FPS_INTERVAL = 1000 / 30;
-    let coefficients = [0.5, 0.5, 0.5, 0.5];
-    let targets      = coefficients.map(() => Math.random() * 0.6 + 0.2);
-    let speed        = 0.02;
+/* ======================================================
+   All JS in global scope — no IIFEs, var throughout,
+   json_encode for all PHP→JS data transfer.
+   ====================================================== */
 
-    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+// ── fractal canvas ──────────────────────────────────────
+var fractalCanvas  = document.getElementById('fractal-canvas');
+var fractalCtx     = fractalCanvas.getContext('2d');
+var fractalAnimId;
+var fractalLast    = 0;
+var FPS_INTERVAL   = 1000 / 30;
+var coefficients   = [0.5, 0.5, 0.5, 0.5];
+var fractalTargets = [
+    Math.random() * 0.6 + 0.2,
+    Math.random() * 0.6 + 0.2,
+    Math.random() * 0.6 + 0.2,
+    Math.random() * 0.6 + 0.2
+];
+var fractalSpeed   = 0.02;
 
-    function drawGasket(x, y, r, depth) {
-        if (depth <= 0) return;
-        ctx.beginPath();
-        ctx.arc(x, y, r * coefficients[1], 0, Math.PI * 2);
-        ctx.stroke();
-        if (depth > 1) {
-            const nr = r * 0.5;
-            drawGasket(x - r * 0.5, y, nr, depth - 1);
-            drawGasket(x + r * 0.5, y, nr, depth - 1);
-            drawGasket(x, y - r * 0.5, nr, depth - 1);
-            drawGasket(x, y + r * 0.5, nr, depth - 1);
+function fractalResize() {
+    fractalCanvas.width  = window.innerWidth;
+    fractalCanvas.height = window.innerHeight;
+}
+
+function drawGasket(x, y, r, depth) {
+    if (depth <= 0) return;
+    fractalCtx.beginPath();
+    fractalCtx.arc(x, y, Math.max(1, r * coefficients[1]), 0, Math.PI * 2);
+    fractalCtx.stroke();
+    if (depth > 1) {
+        var nr = r * 0.5;
+        drawGasket(x - r * 0.5, y,       nr, depth - 1);
+        drawGasket(x + r * 0.5, y,       nr, depth - 1);
+        drawGasket(x,           y - r * 0.5, nr, depth - 1);
+        drawGasket(x,           y + r * 0.5, nr, depth - 1);
+    }
+}
+
+function fractalTick(ts) {
+    if (ts - fractalLast < FPS_INTERVAL) {
+        fractalAnimId = requestAnimationFrame(fractalTick);
+        return;
+    }
+    fractalLast = ts;
+
+    fractalCtx.fillStyle = 'rgba(255,255,255,0.05)';
+    fractalCtx.fillRect(0, 0, fractalCanvas.width, fractalCanvas.height);
+
+    if (isPlaying && analyserNode && freqData) {
+        analyserNode.getByteFrequencyData(freqData);
+        var bass = freqData[0] / 255;
+        var mid  = freqData[10] / 255;
+        var hi   = freqData[50] / 255;
+        fractalTargets[0] = 0.2 + bass * 2;
+        fractalTargets[1] = 0.2 + mid  * 2;
+        fractalTargets[2] = 0.2 + hi   * 2;
+        fractalTargets[3] = 0.2 + (bass + mid + hi) / 3 * 2;
+        fractalSpeed      = 0.02 + (bass + mid + hi) / 3 * 0.08;
+        fractalCtx.lineWidth = 0.5 + bass * 2;
+    } else {
+        fractalSpeed         = 0.02;
+        fractalCtx.lineWidth = 0.5;
+    }
+
+    fractalCtx.strokeStyle = 'rgba(0,0,0,0.7)';
+    var cx = fractalCanvas.width  / 2;
+    var cy = fractalCanvas.height / 2;
+    var cr = Math.min(fractalCanvas.width, fractalCanvas.height) * 2;
+    drawGasket(cx, cy, cr, 4);
+
+    for (var i = 0; i < 4; i++) {
+        coefficients[i] += (fractalTargets[i] - coefficients[i]) * fractalSpeed;
+        if (Math.abs(coefficients[i] - fractalTargets[i]) < 0.01) {
+            fractalTargets[i] = Math.random() * 0.6 + 0.2;
         }
     }
 
-    function tick(ts) {
-        if (ts - lastTime < FPS_INTERVAL) { animId = requestAnimationFrame(tick); return; }
-        lastTime = ts;
+    fractalAnimId = requestAnimationFrame(fractalTick);
+}
 
-        ctx.fillStyle = 'rgba(255,255,255,0.05)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+function fractalStart() {
+    fractalResize();
+    fractalAnimId = requestAnimationFrame(fractalTick);
+}
 
-        if (isPlaying && analyserNode) {
-            analyserNode.getByteFrequencyData(freqData);
-            const bass = freqData[0] / 255, mid = freqData[10] / 255, hi = freqData[50] / 255;
-            targets[0] = 0.2 + bass * 2; targets[1] = 0.2 + mid * 2;
-            targets[2] = 0.2 + hi * 2;   targets[3] = 0.2 + (bass + mid + hi) / 3 * 2;
-            speed = 0.02 + (bass + mid + hi) / 3 * 0.08;
-            ctx.lineWidth = 0.5 + bass * 2;
-        } else {
-            speed = 0.02; ctx.lineWidth = 0.5;
-        }
-
-        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-        drawGasket(canvas.width / 2, canvas.height / 2, Math.min(canvas.width, canvas.height) * 2, 4);
-
-        for (let i = 0; i < 4; i++) {
-            coefficients[i] += (targets[i] - coefficients[i]) * speed;
-            if (Math.abs(coefficients[i] - targets[i]) < 0.01) targets[i] = Math.random() * 0.6 + 0.2;
-        }
-        animId = requestAnimationFrame(tick);
+window.addEventListener('resize', fractalResize);
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        cancelAnimationFrame(fractalAnimId);
+    } else {
+        fractalAnimId = requestAnimationFrame(fractalTick);
     }
+});
+fractalStart();
 
-    resize();
-    window.addEventListener('resize', resize);
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) cancelAnimationFrame(animId);
-        else { animId = requestAnimationFrame(tick); }
-    });
-    animId = requestAnimationFrame(tick);
-})();
-
-// ---- player ----
+// ── audio player ────────────────────────────────────────
 var isPlaying    = false;
-var currentMode  = null;   // 'local' | 'sc'
+var currentMode  = null;
 var audioCtx     = null;
 var analyserNode = null;
 var freqData     = null;
@@ -739,13 +773,13 @@ var scIframe = document.getElementById('sc-widget');
 function setupAnalyser() {
     if (audioCtx) return;
     try {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx     = new (window.AudioContext || window.webkitAudioContext)();
         analyserNode = audioCtx.createAnalyser();
         analyserNode.fftSize = 256;
-        sourceNode = audioCtx.createMediaElementSource(audioEl);
+        sourceNode   = audioCtx.createMediaElementSource(audioEl);
         sourceNode.connect(analyserNode);
         analyserNode.connect(audioCtx.destination);
-        freqData = new Uint8Array(analyserNode.frequencyBinCount);
+        freqData     = new Uint8Array(analyserNode.frequencyBinCount);
     } catch (e) {
         console.warn('AudioContext setup failed:', e);
         audioCtx = null;
@@ -757,21 +791,30 @@ function fmtTime(s) {
     return Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60);
 }
 
-// Playlist state
+function updateIcon() {
+    document.getElementById('play-icon').style.display  = isPlaying ? 'none'  : 'block';
+    document.getElementById('pause-icon').style.display = isPlaying ? 'block' : 'none';
+}
+
+function setNowPlaying(title, artist) {
+    document.getElementById('track-name').textContent  = title;
+    document.getElementById('artist-name').textContent = artist ? ' - ' + artist : '';
+}
+
 var localPlaylist = [];
 var scPlaylist    = [];
 var localIdx      = 0;
 var scIdx         = 0;
 var playlistMode  = 'local';
 
-function doPlay() {
-    var p = audioEl.play();
-    if (p !== undefined) {
-        p.then(function() {
+function startPlay() {
+    var promise = audioEl.play();
+    if (promise !== undefined) {
+        promise.then(function() {
             isPlaying = true;
             updateIcon();
-        }).catch(function(e) {
-            console.warn('Playback error:', e);
+        }).catch(function(err) {
+            console.warn('play() failed:', err);
         });
     } else {
         isPlaying = true;
@@ -787,55 +830,41 @@ function playLocal(url, title, artist) {
     setupAnalyser();
     audioEl.src = url;
 
-    // Resume AudioContext (required by browsers after first user gesture)
     if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume().then(function() { doPlay(); });
+        audioCtx.resume().then(function() { startPlay(); });
     } else {
-        doPlay();
+        startPlay();
     }
 
     setNowPlaying(title, artist);
 
-    var found = false;
     for (var i = 0; i < localPlaylist.length; i++) {
-        if (localPlaylist[i].url === url) { localIdx = i; found = true; break; }
+        if (localPlaylist[i].url === url) { localIdx = i; break; }
     }
-    if (!found) localIdx = 0;
 }
 
 function playSC(permalinkUrl, title, artist) {
-    if (currentMode === 'local') { audioEl.pause(); isPlaying = false; }
+    if (currentMode === 'local') { audioEl.pause(); isPlaying = false; updateIcon(); }
     currentMode  = 'sc';
     playlistMode = 'sc';
 
-    var widgetUrl = 'https://w.soundcloud.com/player/?url=' +
+    scIframe.src = 'https://w.soundcloud.com/player/?url=' +
         encodeURIComponent(permalinkUrl) +
-        '&auto_play=true&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false';
+        '&auto_play=true&hide_related=true&show_comments=false' +
+        '&show_user=false&show_reposts=false&show_teaser=false';
 
-    scIframe.src = widgetUrl;
-
-    // SC Widget needs time to load new src before we can bind
     setTimeout(function() {
         if (typeof SC === 'undefined') return;
         scWidget = SC.Widget(scIframe);
-        scWidget.bind(SC.Widget.Events.READY, function() {
-            scWidget.play();
-        });
-        scWidget.bind(SC.Widget.Events.PLAY, function() {
-            isPlaying = true; updateIcon();
-        });
-        scWidget.bind(SC.Widget.Events.PAUSE, function() {
-            isPlaying = false; updateIcon();
-        });
-        scWidget.bind(SC.Widget.Events.FINISH, function() {
-            isPlaying = false; updateIcon(); nextTrack();
-        });
+        scWidget.bind(SC.Widget.Events.READY, function() { scWidget.play(); });
+        scWidget.bind(SC.Widget.Events.PLAY,  function() { isPlaying = true;  updateIcon(); });
+        scWidget.bind(SC.Widget.Events.PAUSE, function() { isPlaying = false; updateIcon(); });
+        scWidget.bind(SC.Widget.Events.FINISH,function() { isPlaying = false; updateIcon(); nextTrack(); });
         scWidget.bind(SC.Widget.Events.PLAY_PROGRESS, function(e) {
             document.getElementById('progress-bar').style.width = (e.relativePosition * 100) + '%';
-            var cur = Math.floor(e.currentPosition / 1000);
             scWidget.getDuration(function(dur) {
                 document.getElementById('time-display').textContent =
-                    fmtTime(cur) + ' / ' + fmtTime(Math.floor(dur / 1000));
+                    fmtTime(e.currentPosition / 1000) + ' / ' + fmtTime(dur / 1000);
             });
         });
     }, 400);
@@ -849,27 +878,18 @@ function playSC(permalinkUrl, title, artist) {
     }
 }
 
-function setNowPlaying(title, artist) {
-    document.getElementById('track-name').textContent  = title;
-    document.getElementById('artist-name').textContent = artist ? ' - ' + artist : '';
-}
-
 function togglePlay() {
     if (currentMode === 'local') {
-        if (isPlaying) { audioEl.pause(); }
-        else {
+        if (isPlaying) {
+            audioEl.pause();
+        } else {
             if (audioCtx && audioCtx.state === 'suspended') {
-                audioCtx.resume().then(function() { doPlay(); });
-            } else { doPlay(); }
+                audioCtx.resume().then(function() { startPlay(); });
+            } else { startPlay(); }
         }
     } else if (currentMode === 'sc' && scWidget) {
         if (isPlaying) scWidget.pause(); else scWidget.play();
     }
-}
-
-function updateIcon() {
-    document.getElementById('play-icon').style.display  = isPlaying ? 'none'  : 'block';
-    document.getElementById('pause-icon').style.display = isPlaying ? 'block' : 'none';
 }
 
 function seek(e) {
@@ -883,59 +903,66 @@ function seek(e) {
 }
 
 function previousTrack() {
+    var t;
     if (playlistMode === 'sc') {
-        if (scIdx > 0) { scIdx--; var t = scPlaylist[scIdx]; playSC(t.url, t.title, t.artist); }
+        if (scIdx > 0) { scIdx--; t = scPlaylist[scIdx]; playSC(t.url, t.title, t.artist); }
     } else {
-        if (localIdx > 0) { localIdx--; var t = localPlaylist[localIdx]; playLocal(t.url, t.title, t.artist); }
+        if (localIdx > 0) { localIdx--; t = localPlaylist[localIdx]; playLocal(t.url, t.title, t.artist); }
     }
 }
 
 function nextTrack() {
+    var t;
     if (playlistMode === 'sc') {
-        if (scIdx < scPlaylist.length - 1) { scIdx++; var t = scPlaylist[scIdx]; playSC(t.url, t.title, t.artist); }
+        if (scIdx < scPlaylist.length - 1) { scIdx++; t = scPlaylist[scIdx]; playSC(t.url, t.title, t.artist); }
     } else {
-        if (localIdx < localPlaylist.length - 1) { localIdx++; var t = localPlaylist[localIdx]; playLocal(t.url, t.title, t.artist); }
+        if (localIdx < localPlaylist.length - 1) { localIdx++; t = localPlaylist[localIdx]; playLocal(t.url, t.title, t.artist); }
     }
 }
 
-// Build playlists from page data
-(function() {
-    <?php foreach ($tracks as $t): ?>
-    localPlaylist.push({
-        url:    'uploads/music/<?php echo htmlspecialchars($t['filename']); ?>',
-        title:  '<?php echo htmlspecialchars(addslashes($t['title'])); ?>',
-        artist: '<?php echo htmlspecialchars(addslashes($t['artist'])); ?>'
-    });
-    <?php endforeach; ?>
-    <?php foreach ($guestReleases as $g): ?>
-    localPlaylist.push({
-        url:    'uploads/guests/<?php echo htmlspecialchars($g['mp3_filename']); ?>',
-        title:  '<?php echo htmlspecialchars(addslashes($g['track_id'])); ?>',
-        artist: '<?php echo htmlspecialchars(addslashes($g['artist_name'])); ?>'
-    });
-    <?php endforeach; ?>
-    <?php foreach ($legacyTracks as $t): ?>
-    localPlaylist.push({
-        url:    '<?php echo htmlspecialchars($t['_legacy_dir']); ?>/<?php echo htmlspecialchars($t['filename']); ?>',
-        title:  '<?php echo htmlspecialchars(addslashes($t['title'])); ?>',
-        artist: '<?php echo htmlspecialchars(addslashes($t['artist'])); ?>'
-    });
-    <?php endforeach; ?>
-    <?php foreach ($legacyGuests as $g): ?>
-    localPlaylist.push({
-        url:    'guests/<?php echo htmlspecialchars($g['mp3_filename']); ?>',
-        title:  '<?php echo htmlspecialchars(addslashes($g['track_id'])); ?>',
-        artist: '<?php echo htmlspecialchars(addslashes($g['artist_name'])); ?>'
-    });
-    <?php endforeach; ?>
-    <?php foreach ($allScTracks as $sc): ?>
-    scPlaylist.push({
-        url:    '<?php echo htmlspecialchars(addslashes($sc['permalink_url'])); ?>',
-        title:  '<?php echo htmlspecialchars(addslashes($sc['title'])); ?>',
-        artist: '<?php echo htmlspecialchars(addslashes($sc['artist'] ?: $sc['profile_name'])); ?>'
-    });
-    <?php endforeach; ?>
-})();
+// ── playlists (json_encode is safe in <script> blocks) ──
+<?php
+// Build local playlist array in PHP, then dump as JSON
+$jsLocal = array();
+foreach ($tracks as $t) {
+    $jsLocal[] = array(
+        'url'    => 'uploads/music/' . $t['filename'],
+        'title'  => $t['title'],
+        'artist' => $t['artist'],
+    );
+}
+foreach ($guestReleases as $g) {
+    $jsLocal[] = array(
+        'url'    => 'uploads/guests/' . $g['mp3_filename'],
+        'title'  => $g['track_id'],
+        'artist' => $g['artist_name'],
+    );
+}
+foreach ($legacyTracks as $t) {
+    $jsLocal[] = array(
+        'url'    => $t['_legacy_dir'] . '/' . $t['filename'],
+        'title'  => $t['title'],
+        'artist' => $t['artist'],
+    );
+}
+foreach ($legacyGuests as $g) {
+    $jsLocal[] = array(
+        'url'    => 'guests/' . $g['mp3_filename'],
+        'title'  => $g['track_id'],
+        'artist' => $g['artist_name'],
+    );
+}
+$jsSC = array();
+foreach ($allScTracks as $sc) {
+    $jsSC[] = array(
+        'url'    => $sc['permalink_url'],
+        'title'  => $sc['title'],
+        'artist' => $sc['artist'] ?: $sc['profile_name'],
+    );
+}
+?>
+localPlaylist = <?php echo json_encode($jsLocal, JSON_UNESCAPED_UNICODE); ?>;
+scPlaylist    = <?php echo json_encode($jsSC, JSON_UNESCAPED_UNICODE); ?>;
 
 // HTML5 audio events
 audioEl.addEventListener('timeupdate', function() {
