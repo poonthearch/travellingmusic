@@ -532,7 +532,9 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         </td>
                         <td>
                             <?php if ($g['about']): ?>
-                            <a style="color:black" href="<?php echo htmlspecialchars($g['about']); ?>" target="_blank">details</a>
+                            <?php $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $g['about']) ? $g['about'] : '/' . $g['about']; ?>
+                            <?php $_atgt = (strpos($g['about'], 'http') === 0) ? ' target="_blank"' : ''; ?>
+                            <a style="color:black" href="<?php echo htmlspecialchars($_href); ?>"<?php echo $_atgt; ?>><?php echo htmlspecialchars($g['about']); ?></a>
                             <?php endif; ?>
                         </td>
                         <td>
@@ -583,10 +585,10 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                             <?php endif; ?>
                         </td>
                         <td>
-                            <?php if ($g['about'] && filter_var($g['about'], FILTER_VALIDATE_URL)): ?>
-                            <a style="color:black" href="<?php echo htmlspecialchars($g['about']); ?>" target="_blank">details</a>
-                            <?php else: ?>
-                            <?php echo htmlspecialchars($g['about']); ?>
+                            <?php if ($g['about']): ?>
+                            <?php $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $g['about']) ? $g['about'] : '/' . $g['about']; ?>
+                            <?php $_atgt = (strpos($g['about'], 'http') === 0) ? ' target="_blank"' : ''; ?>
+                            <a style="color:black" href="<?php echo htmlspecialchars($_href); ?>"<?php echo $_atgt; ?>><?php echo htmlspecialchars($g['about']); ?></a>
                             <?php endif; ?>
                         </td>
                         <td>
