@@ -1,0 +1,13 @@
+# Database (generated at runtime)
+data/travelling.db
+data/*.db
+
+# Uploaded user files
+uploads/music/
+uploads/images/
+uploads/guests/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
