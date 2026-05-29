@@ -212,12 +212,18 @@ if ($page === 'login') {
         } elseif ($action === 'sync') {
             $result = syncSoundCloudProfile((int)$_POST['id']);
             if ($result['success']) {
-                $msg = "Sync done: {$result['added']} new, {$result['updated']} updated, {$result['total']} total tracks.";
+                $msg = $result['msg'] ?? "Sync done: {$result['added']} new, {$result['updated']} updated.";
             } else {
                 $msg = 'Sync failed: ' . $result['error']; $msgType = 'err';
             }
 
         } elseif ($action === 'delete_track') {
+            $row = $db->prepare("SELECT local_filename FROM soundcloud_tracks WHERE id=?");
+            $row->execute([(int)$_POST['id']]);
+            $r = $row->fetch();
+            if ($r && $r['local_filename']) {
+                @unlink(dirname(__DIR__) . '/uploads/sc_music/' . $r['local_filename']);
+            }
             $db->prepare("DELETE FROM soundcloud_tracks WHERE id=?")->execute([(int)$_POST['id']]);
             $msg = 'Track removed.';
         }
@@ -234,12 +240,9 @@ if ($page === 'login') {
                     $msg = 'Password updated.';
                 }
             }
-            if (isset($_POST['sc_client_id'])) {
-                setSetting('sc_client_id', trim($_POST['sc_client_id']));
-                $msg = ($msg ? $msg . ' ' : '') . 'SoundCloud client_id saved.';
-            }
             if (isset($_POST['site_title'])) {
                 setSetting('site_title', trim($_POST['site_title']) ?: 'travelling music™');
+                $msg = ($msg ? $msg . ' ' : '') . 'Settings saved.';
             }
         }
     }
@@ -276,8 +279,7 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
             $scRows     = $db->query("SELECT st.*, sp.username AS profile_username FROM soundcloud_tracks st JOIN soundcloud_profiles sp ON sp.id = st.profile_id ORDER BY st.profile_id ASC, st.id ASC")->fetchAll();
             break;
         case 'settings':
-            $currentSCId    = getSetting('sc_client_id');
-            $adminToken     = getSetting('admin_token');
+            $adminToken       = getSetting('admin_token');
             $currentSiteTitle = getSetting('site_title');
             break;
     }
@@ -786,11 +788,23 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
         // SOUNDCLOUD
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         elseif ($page === 'soundcloud'):
+        $ytdlpOk  = (bool)ytdlpBin();
+        $ffmpegOk = ffmpegAvailable();
         ?>
         <h1>SoundCloud Profiles</h1>
 
-        <?php if (!getSetting('sc_client_id')): ?>
-        <div class="msg err">SoundCloud client_id is not set. Go to <a href="admin.php?page=settings">Settings</a> to add it before syncing.</div>
+        <?php if (!$ytdlpOk): ?>
+        <div class="msg err">
+            <strong>yt-dlp not found.</strong> Install it on the server so that track syncing works:<br>
+            <code>pip install yt-dlp</code> &nbsp;or&nbsp; <code>pip3 install yt-dlp</code>
+        </div>
+        <?php elseif (!$ffmpegOk): ?>
+        <div class="msg" style="border-color:#888;background:#fffbe6">
+            <strong>ffmpeg not found.</strong> Tracks will download but may not convert to MP3.
+            Install ffmpeg for best compatibility.
+        </div>
+        <?php else: ?>
+        <div class="msg ok">yt-dlp and ffmpeg found — ready to sync &amp; download.</div>
         <?php endif; ?>
 
         <!-- Add profile -->
@@ -878,7 +892,7 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
         <?php if (!empty($scRows)): ?>
         <h2>SoundCloud tracks (<?php echo count($scRows); ?>)</h2>
         <table>
-            <thead><tr><th width="50">Art</th><th>Title</th><th>Artist</th><th>Profile</th><th>Duration</th><th width="100">Actions</th></tr></thead>
+            <thead><tr><th width="50">Art</th><th>Title</th><th>Artist</th><th>Profile</th><th width="80">File</th><th width="80">Actions</th></tr></thead>
             <tbody>
             <?php foreach ($scRows as $t): ?>
             <tr>
@@ -890,10 +904,9 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
                 </td>
                 <td><?php echo htmlspecialchars($t['artist']); ?></td>
                 <td><?php echo htmlspecialchars($t['profile_username']); ?></td>
-                <td><?php
-                    $s = intdiv($t['duration'], 1000);
-                    echo floor($s/60).':'.str_pad($s%60,2,'0',STR_PAD_LEFT);
-                ?></td>
+                <td style="font-size:11px;color:<?php echo $t['local_filename'] ? '#060' : '#c00'; ?>">
+                    <?php echo $t['local_filename'] ? '&#10003; ' . htmlspecialchars($t['local_filename']) : '&#10007; not downloaded'; ?>
+                </td>
                 <td>
                     <form method="post" style="display:inline" onsubmit="return confirm('Remove this track?')">
                         <input type="hidden" name="action" value="delete_track">
@@ -906,7 +919,7 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
             </tbody>
         </table>
         <?php elseif (!empty($scProfiles)): ?>
-        <p>No tracks yet. Click <strong>Sync Tracks</strong> on a profile above.</p>
+        <p>No tracks yet. Click <strong>Sync</strong> on a profile above.</p>
         <?php endif; ?>
 
         <?php
@@ -928,20 +941,6 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
                 <button class="btn primary">Save</button>
             </div>
 
-            <!-- SoundCloud -->
-            <div class="form-section">
-                <h2>SoundCloud API</h2>
-                <p style="font-size:12px;margin-top:0">
-                    To sync SoundCloud profiles you need a <strong>client_id</strong>.<br>
-                    Register your app at <a href="https://soundcloud.com/you/apps" target="_blank">soundcloud.com/you/apps</a>
-                    and paste the client_id below.
-                </p>
-                <div class="field">
-                    <label>SoundCloud client_id</label>
-                    <input type="text" name="sc_client_id" value="<?php echo htmlspecialchars($currentSCId); ?>" placeholder="Paste your SC client_id">
-                </div>
-                <button class="btn primary">Save</button>
-            </div>
         </form>
 
         <!-- Change password (separate form) -->

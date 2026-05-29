@@ -76,12 +76,10 @@ function initSchema(PDO $db): void {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
 
-    // Migration: add section column if upgrading from older schema
+    // Migrations: add columns when upgrading from older schema
     try {
         $db->exec("ALTER TABLE soundcloud_profiles ADD COLUMN section TEXT NOT NULL DEFAULT 'external'");
-    } catch (Exception $e) {
-        // Column already exists — fine
-    }
+    } catch (Exception $e) { /* already exists */ }
 
     $db->exec("CREATE TABLE IF NOT EXISTS soundcloud_tracks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,9 +90,14 @@ function initSchema(PDO $db): void {
         artwork_url TEXT NOT NULL DEFAULT '',
         permalink_url TEXT NOT NULL,
         duration INTEGER NOT NULL DEFAULT 0,
+        local_filename TEXT NOT NULL DEFAULT '',
         sort_order INTEGER NOT NULL DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
+
+    try {
+        $db->exec("ALTER TABLE soundcloud_tracks ADD COLUMN local_filename TEXT NOT NULL DEFAULT ''");
+    } catch (Exception $e) { /* already exists */ }
 
     // Insert defaults only once
     $check = $db->query("SELECT COUNT(*) FROM settings")->fetchColumn();

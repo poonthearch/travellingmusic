@@ -1,119 +1,168 @@
 <?php
 require_once __DIR__ . '/db.php';
 
-function scFetch(string $url): ?array {
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 30,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; travellingmusic/1.0)',
-        CURLOPT_HTTPHEADER     => ['Accept: application/json'],
-    ]);
-    $body     = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if ($httpCode !== 200 || !$body) return null;
-    return json_decode($body, true);
-}
-
-function scResolveUser(string $username, string $clientId): ?array {
-    $url = 'https://api-v2.soundcloud.com/resolve?' . http_build_query([
-        'url'       => 'https://soundcloud.com/' . $username,
-        'client_id' => $clientId,
-    ]);
-    return scFetch($url);
-}
-
-function scGetUserTracks(string $userId, string $clientId, int $limit = 200): array {
-    $url = 'https://api-v2.soundcloud.com/users/' . $userId . '/tracks?' . http_build_query([
-        'client_id'    => $clientId,
-        'limit'        => min($limit, 200),
-        'representation' => 'compact',
-    ]);
-    $data = scFetch($url);
-    if (!$data || empty($data['collection'])) return [];
-
-    $tracks = [];
-    foreach ($data['collection'] as $t) {
-        if (($t['kind'] ?? '') !== 'track') continue;
-
-        $artwork = $t['artwork_url'] ?? '';
-        // Upgrade to larger artwork
-        if ($artwork) {
-            $artwork = str_replace('-large.', '-t300x300.', $artwork);
+function ytdlpBin(): string {
+    static $bin = null;
+    if ($bin !== null) return $bin;
+    $candidates = ['yt-dlp', '/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp', '/usr/local/sbin/yt-dlp'];
+    foreach ($candidates as $c) {
+        $out = [];
+        exec('which ' . escapeshellarg($c) . ' 2>/dev/null', $out, $ret);
+        if ($ret === 0 && !empty($out[0])) {
+            $bin = trim($out[0]);
+            return $bin;
         }
-
-        $tracks[] = [
-            'sc_track_id'   => (string)$t['id'],
-            'title'         => $t['title']                  ?? 'Untitled',
-            'artist'        => $t['user']['username']       ?? '',
-            'artwork_url'   => $artwork,
-            'permalink_url' => $t['permalink_url']          ?? '',
-            'duration'      => (int)($t['duration']        ?? 0),
-        ];
     }
-    return $tracks;
+    $bin = '';
+    return $bin;
+}
+
+function ffmpegAvailable(): bool {
+    exec('which ffmpeg 2>/dev/null', $out, $ret);
+    return $ret === 0 && !empty($out[0]);
+}
+
+function scDownloadDir(): string {
+    $dir = dirname(__DIR__) . '/uploads/sc_music';
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
+    return $dir;
 }
 
 function syncSoundCloudProfile(int $profileId): array {
-    $db       = getDB();
-    $clientId = getSetting('sc_client_id');
-
-    if (empty($clientId)) {
-        return ['success' => false, 'error' => 'SoundCloud client_id not configured in Settings.'];
+    $ytdlp = ytdlpBin();
+    if (!$ytdlp) {
+        return [
+            'success' => false,
+            'error'   => 'yt-dlp not found on this server. Install it with: pip install yt-dlp',
+        ];
     }
 
+    $db = getDB();
     $stmt = $db->prepare("SELECT * FROM soundcloud_profiles WHERE id = ?");
     $stmt->execute([$profileId]);
     $profile = $stmt->fetch();
-    if (!$profile) return ['success' => false, 'error' => 'Profile not found.'];
-
-    $user = scResolveUser($profile['username'], $clientId);
-    if (!$user || empty($user['id'])) {
-        return ['success' => false, 'error' => 'Could not resolve SoundCloud user "' . $profile['username'] . '". Check username and client_id.'];
+    if (!$profile) {
+        return ['success' => false, 'error' => 'Profile not found.'];
     }
 
-    $userId      = (string)$user['id'];
-    $displayName = $user['username'] ?? $profile['username'];
+    $username = preg_replace('/[^a-zA-Z0-9_.-]/', '', $profile['username']);
+    if (!$username) {
+        return ['success' => false, 'error' => 'Invalid SoundCloud username.'];
+    }
 
-    $tracks = scGetUserTracks($userId, $clientId);
+    $scUrl = 'https://soundcloud.com/' . $username;
+    $dir   = scDownloadDir();
+
+    set_time_limit(600);
+
+    // Step 1: fetch track list without downloading
+    $listCmd = escapeshellarg($ytdlp)
+             . ' --flat-playlist --dump-json --no-warnings'
+             . ' ' . escapeshellarg($scUrl)
+             . ' 2>/dev/null';
+    $lines = [];
+    exec($listCmd, $lines);
+
+    if (empty($lines)) {
+        return [
+            'success' => false,
+            'error'   => 'No tracks found for soundcloud.com/' . $username
+                       . '. Make sure the profile is public.',
+        ];
+    }
+
+    $tracks = [];
+    foreach ($lines as $line) {
+        $info = json_decode(trim($line), true);
+        if (!$info || empty($info['id'])) continue;
+        $trackUrl = $info['webpage_url'] ?? $info['url'] ?? '';
+        if (!$trackUrl) $trackUrl = 'https://soundcloud.com/' . $username . '/' . $info['id'];
+        $tracks[] = [
+            'id'        => (string)$info['id'],
+            'title'     => $info['title']    ?? 'Untitled',
+            'uploader'  => $info['uploader'] ?? $info['channel'] ?? $username,
+            'thumbnail' => $info['thumbnail'] ?? '',
+            'url'       => $trackUrl,
+        ];
+    }
+
     if (empty($tracks)) {
-        return ['success' => false, 'error' => 'No public tracks found for this user.'];
+        return ['success' => false, 'error' => 'Could not parse track data from yt-dlp output.'];
     }
 
-    $added   = 0;
-    $updated = 0;
+    $added    = 0;
+    $updated  = 0;
+    $dlFailed = 0;
 
-    $checkStmt = $db->prepare("SELECT id FROM soundcloud_tracks WHERE sc_track_id = ?");
+    $checkStmt  = $db->prepare("SELECT id FROM soundcloud_tracks WHERE sc_track_id = ?");
     $updateStmt = $db->prepare(
-        "UPDATE soundcloud_tracks SET title=?, artist=?, artwork_url=?, permalink_url=?, duration=? WHERE sc_track_id=?"
+        "UPDATE soundcloud_tracks SET title=?, artist=?, artwork_url=?, permalink_url=?, local_filename=? WHERE sc_track_id=?"
     );
     $insertStmt = $db->prepare(
-        "INSERT INTO soundcloud_tracks (profile_id, sc_track_id, title, artist, artwork_url, permalink_url, duration)
+        "INSERT INTO soundcloud_tracks (profile_id, sc_track_id, title, artist, artwork_url, permalink_url, local_filename)
          VALUES (?, ?, ?, ?, ?, ?, ?)"
     );
 
     foreach ($tracks as $t) {
-        $checkStmt->execute([$t['sc_track_id']]);
+        // Download the MP3 if not already on disk
+        $localFile  = '';
+        $outputGlob = $dir . '/' . $t['id'] . '.*';
+        $existing   = glob($outputGlob);
+
+        if (!empty($existing)) {
+            $localFile = basename($existing[0]);
+        } else {
+            $dlCmd = escapeshellarg($ytdlp)
+                   . ' -x --audio-format mp3 --audio-quality 0'
+                   . ' --no-playlist --no-warnings'
+                   . ' -o ' . escapeshellarg($dir . '/%(id)s.%(ext)s')
+                   . ' ' . escapeshellarg($t['url'])
+                   . ' 2>/dev/null';
+            exec($dlCmd);
+
+            $found = glob($outputGlob);
+            if (!empty($found)) {
+                $localFile = basename($found[0]);
+            } else {
+                $dlFailed++;
+            }
+        }
+
+        $checkStmt->execute([$t['id']]);
         if ($checkStmt->fetchColumn()) {
             $updateStmt->execute([
-                $t['title'], $t['artist'], $t['artwork_url'],
-                $t['permalink_url'], $t['duration'], $t['sc_track_id'],
+                $t['title'], $t['uploader'], $t['thumbnail'],
+                $t['url'], $localFile, $t['id'],
             ]);
             $updated++;
         } else {
             $insertStmt->execute([
-                $profileId, $t['sc_track_id'], $t['title'], $t['artist'],
-                $t['artwork_url'], $t['permalink_url'], $t['duration'],
+                $profileId, $t['id'], $t['title'], $t['uploader'],
+                $t['thumbnail'], $t['url'], $localFile,
             ]);
             $added++;
         }
     }
 
-    $db->prepare("UPDATE soundcloud_profiles SET display_name=?, sc_user_id=?, last_synced=CURRENT_TIMESTAMP WHERE id=?")
-       ->execute([$displayName, $userId, $profileId]);
+    $db->prepare("UPDATE soundcloud_profiles SET display_name=?, last_synced=CURRENT_TIMESTAMP WHERE id=?")
+       ->execute([$username, $profileId]);
 
-    return ['success' => true, 'added' => $added, 'updated' => $updated, 'total' => count($tracks)];
+    $total = count($tracks);
+    $msg   = "Sync done: {$added} new, {$updated} updated, {$total} total.";
+    if ($dlFailed > 0) {
+        $msg .= " {$dlFailed} track(s) could not be downloaded"
+              . " (make sure \"Allow Downloads\" is enabled on SoundCloud for each track,"
+              . (ffmpegAvailable() ? '' : ' and ffmpeg is installed for MP3 conversion')
+              . ').';
+    }
+
+    return [
+        'success' => true,
+        'added'   => $added,
+        'updated' => $updated,
+        'total'   => $total,
+        'msg'     => $msg,
+    ];
 }

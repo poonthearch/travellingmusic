@@ -3,6 +3,10 @@ require_once __DIR__ . '/includes/db.php';
 
 $db = getDB();
 
+// Base URL path for resolving relative links stored in the DB
+// e.g. if site lives at /www/travellingmusic.ru/, relative "slicer.php" → "/www/travellingmusic.ru/slicer.php"
+$_sitePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
+
 // ── DB content ───────────────────────────────────────────────────────────────
 $artists       = $db->query("SELECT * FROM artists ORDER BY sort_order ASC, id ASC")->fetchAll();
 $merchItems    = $db->query("SELECT * FROM merch_items ORDER BY sort_order ASC, id ASC")->fetchAll();
@@ -436,11 +440,19 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         <td><?php echo htmlspecialchars($sc['artist'] ?: $sc['profile_name']); ?></td>
                         <td></td>
                         <td>
+                            <?php if ($sc['local_filename']): ?>
+                            <button class="play-btn" onclick="playLocal(
+                                'uploads/sc_music/<?php echo htmlspecialchars($sc['local_filename']); ?>',
+                                '<?php echo htmlspecialchars(addslashes($sc['title'])); ?>',
+                                '<?php echo htmlspecialchars(addslashes($sc['artist'] ?: $sc['profile_name'])); ?>'
+                            )">Play</button>
+                            <?php else: ?>
                             <button class="play-btn" onclick="playSC(
                                 '<?php echo htmlspecialchars(addslashes($sc['permalink_url'])); ?>',
                                 '<?php echo htmlspecialchars(addslashes($sc['title'])); ?>',
                                 '<?php echo htmlspecialchars(addslashes($sc['artist'] ?: $sc['profile_name'])); ?>'
                             )">Play</button>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -486,7 +498,7 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         <td><?php
                             $lnk = trim($artist['links']);
                             if ($lnk) {
-                                $href = preg_match('#^(https?://|//|/|#|mailto:)#i', $lnk) ? $lnk : '/' . $lnk;
+                                $href = preg_match('#^(https?://|//|/|#|mailto:)#i', $lnk) ? $lnk : $_sitePath . '/' . $lnk;
                                 $target = (strpos($lnk, 'http') === 0) ? ' target="_blank"' : '';
                                 echo '<a style="color:black" href="' . htmlspecialchars($href) . '"' . $target . '>'
                                    . htmlspecialchars($lnk) . '</a>';
@@ -532,7 +544,7 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         </td>
                         <td>
                             <?php if ($g['about']): ?>
-                            <?php $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $g['about']) ? $g['about'] : '/' . $g['about']; ?>
+                            <?php $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $g['about']) ? $g['about'] : $_sitePath . '/' . $g['about']; ?>
                             <?php $_atgt = (strpos($g['about'], 'http') === 0) ? ' target="_blank"' : ''; ?>
                             <a style="color:black" href="<?php echo htmlspecialchars($_href); ?>"<?php echo $_atgt; ?>><?php echo htmlspecialchars($g['about']); ?></a>
                             <?php endif; ?>
@@ -563,11 +575,19 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                             <a style="color:black" href="<?php echo htmlspecialchars($sc['permalink_url']); ?>" target="_blank">SC</a>
                         </td>
                         <td>
+                            <?php if ($sc['local_filename']): ?>
+                            <button class="play-btn" onclick="playLocal(
+                                'uploads/sc_music/<?php echo htmlspecialchars($sc['local_filename']); ?>',
+                                '<?php echo htmlspecialchars(addslashes($sc['title'])); ?>',
+                                '<?php echo htmlspecialchars(addslashes($sc['artist'] ?: $sc['profile_name'])); ?>'
+                            )">Play</button>
+                            <?php else: ?>
                             <button class="play-btn" onclick="playSC(
                                 '<?php echo htmlspecialchars(addslashes($sc['permalink_url'])); ?>',
                                 '<?php echo htmlspecialchars(addslashes($sc['title'])); ?>',
                                 '<?php echo htmlspecialchars(addslashes($sc['artist'] ?: $sc['profile_name'])); ?>'
                             )">Play</button>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -586,7 +606,7 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         </td>
                         <td>
                             <?php if ($g['about']): ?>
-                            <?php $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $g['about']) ? $g['about'] : '/' . $g['about']; ?>
+                            <?php $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $g['about']) ? $g['about'] : $_sitePath . '/' . $g['about']; ?>
                             <?php $_atgt = (strpos($g['about'], 'http') === 0) ? ' target="_blank"' : ''; ?>
                             <a style="color:black" href="<?php echo htmlspecialchars($_href); ?>"<?php echo $_atgt; ?>><?php echo htmlspecialchars($g['about']); ?></a>
                             <?php endif; ?>
