@@ -3,6 +3,7 @@ require_once __DIR__ . '/includes/db.php';
 
 $db = getDB();
 
+// ── DB content ───────────────────────────────────────────────────────────────
 $artists       = $db->query("SELECT * FROM artists ORDER BY sort_order ASC, id ASC")->fetchAll();
 $merchItems    = $db->query("SELECT * FROM merch_items ORDER BY sort_order ASC, id ASC")->fetchAll();
 $tracks        = $db->query("SELECT * FROM tracks ORDER BY sort_order ASC, id ASC")->fetchAll();
@@ -11,9 +12,101 @@ $scQuery = "SELECT st.*, sp.display_name AS profile_name, sp.section AS profile_
             FROM soundcloud_tracks st
             JOIN soundcloud_profiles sp ON sp.id = st.profile_id
             ORDER BY st.sort_order ASC, st.id ASC";
-$allScTracks    = $db->query($scQuery)->fetchAll();
-$scTrackMusic   = array_filter($allScTracks, fn($t) => $t['profile_section'] === 'music');
-$scTrackExternal= array_filter($allScTracks, fn($t) => $t['profile_section'] !== 'music');
+$allScTracks     = $db->query($scQuery)->fetchAll();
+$scTrackMusic    = array_filter($allScTracks, function($t) { return $t['profile_section'] === 'music'; });
+$scTrackExternal = array_filter($allScTracks, function($t) { return $t['profile_section'] !== 'music'; });
+
+// ── Backward-compat: legacy flat-file content ────────────────────────────────
+// Reads the old file layout that existed before the DB rewrite.
+// Content from files is appended after DB rows so existing deployments keep
+// showing their uploaded material without any migration step.
+
+// Legacy music files: music/*.mp3  (original dir was "muyysic" but support both)
+$legacyTracks = array();
+foreach (array('music', 'muyysic') as $_mdir) {
+    if (!is_dir(__DIR__ . '/' . $_mdir)) continue;
+    foreach (scandir(__DIR__ . '/' . $_mdir) as $_f) {
+        if (strtolower(pathinfo($_f, PATHINFO_EXTENSION)) !== 'mp3') continue;
+        $_base  = pathinfo($_f, PATHINFO_FILENAME);
+        $_parts = explode('-', $_base);
+        $_date  = isset($_parts[2]) ? implode('/', str_split(preg_replace('/[^0-9]/','',$_parts[2]), 2)) : '';
+        $legacyTracks[] = array(
+            'id'           => 'legacy_' . $_f,
+            'filename'     => $_f,
+            'title'        => $_parts[0] ?? $_base,
+            'artist'       => $_parts[1] ?? '',
+            'release_date' => $_date,
+            '_legacy_dir'  => $_mdir,
+        );
+    }
+}
+
+// Legacy merch images: images/*.jpg|jpeg
+$legacyMerch = array();
+if (is_dir(__DIR__ . '/images')) {
+    foreach (scandir(__DIR__ . '/images') as $_f) {
+        $_ext = strtolower(pathinfo($_f, PATHINFO_EXTENSION));
+        if (!in_array($_ext, array('jpg','jpeg','png','webp'))) continue;
+        $_base  = pathinfo($_f, PATHINFO_FILENAME);
+        $_parts = explode('-', $_base);
+        $legacyMerch[] = array(
+            'id'             => 'legacy_' . $_f,
+            'image_filename' => $_f,
+            'title'          => $_parts[0] ?? $_base,
+            'size'           => $_parts[1] ?? '',
+            'price'          => $_parts[2] ?? '',
+            'about'          => isset($_parts[3]) ? str_replace('_', ' ', $_parts[3]) : '',
+            '_legacy'        => true,
+        );
+    }
+}
+
+// Legacy artists: artists/artists.txt
+$legacyArtists = array();
+if (file_exists(__DIR__ . '/artists/artists.txt')) {
+    foreach (file(__DIR__ . '/artists/artists.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $_line) {
+        $_p = explode(' ', $_line, 3);
+        $legacyArtists[] = array(
+            'id'    => 'legacy_' . md5($_line),
+            'name'  => $_p[0] ?? '',
+            'links' => $_p[1] ?? '',
+            'about' => $_p[2] ?? '',
+        );
+    }
+}
+
+// Legacy guest releases: guests/*.mp3  (paired with same-named image)
+$legacyGuests = array();
+if (is_dir(__DIR__ . '/guests')) {
+    $_gImgs = array();
+    foreach (scandir(__DIR__ . '/guests') as $_f) {
+        $_ext = strtolower(pathinfo($_f, PATHINFO_EXTENSION));
+        if (in_array($_ext, array('jpg','jpeg','png'))) {
+            $_gImgs[pathinfo($_f, PATHINFO_FILENAME)] = $_f;
+        }
+    }
+    foreach (scandir(__DIR__ . '/guests') as $_f) {
+        if (strtolower(pathinfo($_f, PATHINFO_EXTENSION)) !== 'mp3') continue;
+        $_base  = pathinfo($_f, PATHINFO_FILENAME);
+        $_parts = explode('*', $_base);
+        if (count($_parts) < 2) {
+            // Simple filename fallback
+            $_parts = array($_base, $_base, '', '');
+        }
+        $_tid   = $_parts[1] ?? $_base;
+        $_art   = isset($_gImgs[$_tid]) ? $_gImgs[$_tid] : '';
+        $_about = isset($_parts[3]) ? str_replace('_', ' ', $_parts[3]) : '';
+        $legacyGuests[] = array(
+            'id'               => 'legacy_' . $_f,
+            'track_id'         => $_tid,
+            'artist_name'      => $_parts[0] ?? '',
+            'artwork_filename' => $_art,
+            'about'            => $_about,
+            'mp3_filename'     => $_f,
+            '_legacy'          => true,
+        );
+    }
+}
 
 $siteTitle = getSetting('site_title') ?: 'travelling music™';
 ?>
@@ -274,7 +367,24 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         <td><a style="color:black" href="mailto:sell@travellingmusic.ru?subject=merch">link</a></td>
                     </tr>
                     <?php endforeach; ?>
-                    <?php if (empty($merchItems)): ?>
+                    <!-- Legacy merch from images/ -->
+                    <?php foreach ($legacyMerch as $item): ?>
+                    <tr>
+                        <td>
+                            <img class="thumb"
+                                 src="images/<?php echo htmlspecialchars($item['image_filename']); ?>"
+                                 alt="<?php echo htmlspecialchars($item['title']); ?>"
+                                 onclick="openModal(this.src)"
+                                 style="cursor:zoom-in">
+                        </td>
+                        <td><?php echo htmlspecialchars($item['title']); ?></td>
+                        <td><?php echo htmlspecialchars($item['size']); ?></td>
+                        <td><?php echo htmlspecialchars($item['price']); ?>$</td>
+                        <td><?php echo htmlspecialchars($item['about']); ?></td>
+                        <td><a style="color:black" href="mailto:sell@travellingmusic.ru?subject=merch">link</a></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($merchItems) && empty($legacyMerch)): ?>
                     <tr><td colspan="6" style="text-align:center;color:#999">no items yet</td></tr>
                     <?php endif; ?>
                 </tbody>
@@ -330,7 +440,22 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         </td>
                     </tr>
                     <?php endforeach; ?>
-                    <?php if (empty($tracks) && empty($scTrackMusic)): ?>
+                    <!-- Legacy tracks from music/ or muyysic/ -->
+                    <?php foreach ($legacyTracks as $track): ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($track['title']); ?></td>
+                        <td><?php echo htmlspecialchars($track['artist']); ?></td>
+                        <td><?php echo htmlspecialchars($track['release_date']); ?></td>
+                        <td>
+                            <button class="play-btn" onclick="playLocal(
+                                '<?php echo htmlspecialchars($track['_legacy_dir']); ?>/<?php echo htmlspecialchars($track['filename']); ?>',
+                                '<?php echo htmlspecialchars(addslashes($track['title'])); ?>',
+                                '<?php echo htmlspecialchars(addslashes($track['artist'])); ?>'
+                            )">Play</button>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($tracks) && empty($scTrackMusic) && empty($legacyTracks)): ?>
                     <tr><td colspan="4" style="text-align:center;color:#999">no tracks yet</td></tr>
                     <?php endif; ?>
                 </tbody>
@@ -358,7 +483,15 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         <td><?php echo htmlspecialchars($artist['about']); ?></td>
                     </tr>
                     <?php endforeach; ?>
-                    <?php if (empty($artists)): ?>
+                    <!-- Legacy artists from artists/artists.txt -->
+                    <?php foreach ($legacyArtists as $artist): ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($artist['name']); ?></td>
+                        <td><?php echo htmlspecialchars($artist['links']); ?></td>
+                        <td><?php echo htmlspecialchars($artist['about']); ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($artists) && empty($legacyArtists)): ?>
                     <tr><td colspan="3" style="text-align:center;color:#999">no projects yet</td></tr>
                     <?php endif; ?>
                 </tbody>
@@ -433,7 +566,35 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                     </tr>
                     <?php endforeach; ?>
 
-                    <?php if (empty($guestReleases) && empty($scTrackExternal)): ?>
+                    <!-- Legacy guest releases from guests/ -->
+                    <?php foreach ($legacyGuests as $g): ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($g['track_id']); ?></td>
+                        <td><?php echo htmlspecialchars($g['artist_name']); ?></td>
+                        <td>
+                            <?php if ($g['artwork_filename']): ?>
+                            <img class="thumb"
+                                 src="guests/<?php echo htmlspecialchars($g['artwork_filename']); ?>"
+                                 alt="<?php echo htmlspecialchars($g['track_id']); ?>">
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if ($g['about'] && filter_var($g['about'], FILTER_VALIDATE_URL)): ?>
+                            <a style="color:black" href="<?php echo htmlspecialchars($g['about']); ?>" target="_blank">details</a>
+                            <?php else: ?>
+                            <?php echo htmlspecialchars($g['about']); ?>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <button class="play-btn" onclick="playLocal(
+                                'guests/<?php echo htmlspecialchars($g['mp3_filename']); ?>',
+                                '<?php echo htmlspecialchars(addslashes($g['track_id'])); ?>',
+                                '<?php echo htmlspecialchars(addslashes($g['artist_name'])); ?>'
+                            )">Play</button>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($guestReleases) && empty($scTrackExternal) && empty($legacyGuests)): ?>
                     <tr><td colspan="5" style="text-align:center;color:#999">no external releases yet</td></tr>
                     <?php endif; ?>
                 </tbody>
@@ -729,6 +890,20 @@ function nextTrack() {
     <?php foreach ($guestReleases as $g): ?>
     localPlaylist.push({
         url:    'uploads/guests/<?php echo htmlspecialchars($g['mp3_filename']); ?>',
+        title:  '<?php echo htmlspecialchars(addslashes($g['track_id'])); ?>',
+        artist: '<?php echo htmlspecialchars(addslashes($g['artist_name'])); ?>'
+    });
+    <?php endforeach; ?>
+    <?php foreach ($legacyTracks as $t): ?>
+    localPlaylist.push({
+        url:    '<?php echo htmlspecialchars($t['_legacy_dir']); ?>/<?php echo htmlspecialchars($t['filename']); ?>',
+        title:  '<?php echo htmlspecialchars(addslashes($t['title'])); ?>',
+        artist: '<?php echo htmlspecialchars(addslashes($t['artist'])); ?>'
+    });
+    <?php endforeach; ?>
+    <?php foreach ($legacyGuests as $g): ?>
+    localPlaylist.push({
+        url:    'guests/<?php echo htmlspecialchars($g['mp3_filename']); ?>',
         title:  '<?php echo htmlspecialchars(addslashes($g['track_id'])); ?>',
         artist: '<?php echo htmlspecialchars(addslashes($g['artist_name'])); ?>'
     });
