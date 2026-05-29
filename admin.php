@@ -190,14 +190,20 @@ if ($page === 'login') {
 
         if ($action === 'add_profile') {
             $username = trim($_POST['username']);
+            $section  = in_array($_POST['section'] ?? '', ['music', 'external']) ? $_POST['section'] : 'external';
             if ($username) {
                 try {
-                    $db->prepare("INSERT INTO soundcloud_profiles (username) VALUES (?)")->execute([$username]);
+                    $db->prepare("INSERT INTO soundcloud_profiles (username, section) VALUES (?, ?)")->execute([$username, $section]);
                     $msg = 'Profile added. Click Sync to fetch tracks.';
                 } catch (Exception $e) {
                     $msg = 'Profile already exists.'; $msgType = 'err';
                 }
             }
+
+        } elseif ($action === 'edit_profile') {
+            $section = in_array($_POST['section'] ?? '', ['music', 'external']) ? $_POST['section'] : 'external';
+            $db->prepare("UPDATE soundcloud_profiles SET section=? WHERE id=?")->execute([$section, (int)$_POST['id']]);
+            $msg = 'Profile updated.';
 
         } elseif ($action === 'delete_profile') {
             $db->prepare("DELETE FROM soundcloud_profiles WHERE id=?")->execute([(int)$_POST['id']]);
@@ -797,6 +803,13 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
                         <label>SoundCloud username</label>
                         <input type="text" name="username" required placeholder="e.g. yourartist (from soundcloud.com/yourartist)">
                     </div>
+                    <div class="field" style="flex:.5">
+                        <label>Show tracks in section</label>
+                        <select name="section">
+                            <option value="external">./external_releases</option>
+                            <option value="music">./music</option>
+                        </select>
+                    </div>
                     <div class="field" style="flex:0;padding-top:22px">
                         <button class="btn primary">Add Profile</button>
                     </div>
@@ -808,7 +821,7 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
         <?php if (!empty($scProfiles)): ?>
         <h2>Linked profiles</h2>
         <table>
-            <thead><tr><th>Username</th><th>Display Name</th><th>Last Synced</th><th>Tracks</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Username</th><th>Display Name</th><th>Section</th><th>Last Synced</th><th>Tracks</th><th>Actions</th></tr></thead>
             <tbody>
             <?php foreach ($scProfiles as $p):
                 $cnt = getDB()->prepare("SELECT COUNT(*) FROM soundcloud_tracks WHERE profile_id=?");
@@ -822,18 +835,37 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
                     </a>
                 </td>
                 <td><?php echo htmlspecialchars($p['display_name'] ?: '—'); ?></td>
+                <td><?php echo $p['section'] === 'music' ? './music' : './external_releases'; ?></td>
                 <td><?php echo $p['last_synced'] ? htmlspecialchars($p['last_synced']) : '—'; ?></td>
                 <td><?php echo $trackCount; ?></td>
                 <td>
                     <form method="post" style="display:inline">
                         <input type="hidden" name="action" value="sync">
                         <input type="hidden" name="id" value="<?php echo $p['id']; ?>">
-                        <button class="btn sm primary">Sync Tracks</button>
+                        <button class="btn sm primary">Sync</button>
                     </form>
+                    <button class="btn sm" onclick="toggleEdit('sc<?php echo $p['id']; ?>')">Edit</button>
                     <form method="post" style="display:inline" onsubmit="return confirm('Delete profile and ALL its tracks?')">
                         <input type="hidden" name="action" value="delete_profile">
                         <input type="hidden" name="id" value="<?php echo $p['id']; ?>">
                         <button class="btn sm danger">Remove</button>
+                    </form>
+                </td>
+            </tr>
+            <tr class="edit-form-row" id="sc<?php echo $p['id']; ?>">
+                <td colspan="6">
+                    <form method="post" style="display:flex;align-items:flex-end;gap:12px">
+                        <input type="hidden" name="action" value="edit_profile">
+                        <input type="hidden" name="id" value="<?php echo $p['id']; ?>">
+                        <div class="field" style="margin:0">
+                            <label>Section</label>
+                            <select name="section">
+                                <option value="external" <?php echo $p['section'] !== 'music' ? 'selected' : ''; ?>>./external_releases</option>
+                                <option value="music"    <?php echo $p['section'] === 'music'    ? 'selected' : ''; ?>>./music</option>
+                            </select>
+                        </div>
+                        <button class="btn primary sm">Save</button>
+                        <button type="button" class="btn sm" onclick="toggleEdit('sc<?php echo $p['id']; ?>')">Cancel</button>
                     </form>
                 </td>
             </tr>

@@ -71,9 +71,17 @@ function initSchema(PDO $db): void {
         username TEXT NOT NULL UNIQUE,
         display_name TEXT NOT NULL DEFAULT '',
         sc_user_id TEXT NOT NULL DEFAULT '',
+        section TEXT NOT NULL DEFAULT 'external',
         last_synced DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
+
+    // Migration: add section column if upgrading from older schema
+    try {
+        $db->exec("ALTER TABLE soundcloud_profiles ADD COLUMN section TEXT NOT NULL DEFAULT 'external'");
+    } catch (Exception $e) {
+        // Column already exists — fine
+    }
 
     $db->exec("CREATE TABLE IF NOT EXISTS soundcloud_tracks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

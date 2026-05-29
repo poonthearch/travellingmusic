@@ -7,7 +7,13 @@ $artists       = $db->query("SELECT * FROM artists ORDER BY sort_order ASC, id A
 $merchItems    = $db->query("SELECT * FROM merch_items ORDER BY sort_order ASC, id ASC")->fetchAll();
 $tracks        = $db->query("SELECT * FROM tracks ORDER BY sort_order ASC, id ASC")->fetchAll();
 $guestReleases = $db->query("SELECT * FROM guest_releases ORDER BY sort_order ASC, id ASC")->fetchAll();
-$scTracks      = $db->query("SELECT st.*, sp.display_name AS profile_name FROM soundcloud_tracks st JOIN soundcloud_profiles sp ON sp.id = st.profile_id ORDER BY st.sort_order ASC, st.id ASC")->fetchAll();
+$scQuery = "SELECT st.*, sp.display_name AS profile_name, sp.section AS profile_section
+            FROM soundcloud_tracks st
+            JOIN soundcloud_profiles sp ON sp.id = st.profile_id
+            ORDER BY st.sort_order ASC, st.id ASC";
+$allScTracks    = $db->query($scQuery)->fetchAll();
+$scTrackMusic   = array_filter($allScTracks, fn($t) => $t['profile_section'] === 'music');
+$scTrackExternal= array_filter($allScTracks, fn($t) => $t['profile_section'] !== 'music');
 
 $siteTitle = getSetting('site_title') ?: 'travelling music™';
 ?>
@@ -304,7 +310,27 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         </td>
                     </tr>
                     <?php endforeach; ?>
-                    <?php if (empty($tracks)): ?>
+                    <!-- SoundCloud tracks assigned to music section -->
+                    <?php foreach ($scTrackMusic as $sc): ?>
+                    <tr>
+                        <td>
+                            <?php if ($sc['artwork_url']): ?>
+                            <img class="thumb" src="<?php echo htmlspecialchars($sc['artwork_url']); ?>" alt="" style="vertical-align:middle;margin-right:4px">
+                            <?php endif; ?>
+                            <?php echo htmlspecialchars($sc['title']); ?>
+                        </td>
+                        <td><?php echo htmlspecialchars($sc['artist'] ?: $sc['profile_name']); ?></td>
+                        <td></td>
+                        <td>
+                            <button class="play-btn" onclick="playSC(
+                                '<?php echo htmlspecialchars(addslashes($sc['permalink_url'])); ?>',
+                                '<?php echo htmlspecialchars(addslashes($sc['title'])); ?>',
+                                '<?php echo htmlspecialchars(addslashes($sc['artist'] ?: $sc['profile_name'])); ?>'
+                            )">Play</button>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($tracks) && empty($scTrackMusic)): ?>
                     <tr><td colspan="4" style="text-align:center;color:#999">no tracks yet</td></tr>
                     <?php endif; ?>
                 </tbody>
@@ -382,8 +408,8 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                     </tr>
                     <?php endforeach; ?>
 
-                    <!-- SoundCloud tracks -->
-                    <?php foreach ($scTracks as $sc): ?>
+                    <!-- SoundCloud tracks assigned to external section -->
+                    <?php foreach ($scTrackExternal as $sc): ?>
                     <tr>
                         <td><?php echo htmlspecialchars($sc['title']); ?></td>
                         <td><?php echo htmlspecialchars($sc['artist'] ?: $sc['profile_name']); ?></td>
@@ -407,7 +433,7 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                     </tr>
                     <?php endforeach; ?>
 
-                    <?php if (empty($guestReleases) && empty($scTracks)): ?>
+                    <?php if (empty($guestReleases) && empty($scTrackExternal)): ?>
                     <tr><td colspan="5" style="text-align:center;color:#999">no external releases yet</td></tr>
                     <?php endif; ?>
                 </tbody>
@@ -707,7 +733,7 @@ function nextTrack() {
         artist: '<?php echo htmlspecialchars(addslashes($g['artist_name'])); ?>'
     });
     <?php endforeach; ?>
-    <?php foreach ($scTracks as $sc): ?>
+    <?php foreach ($allScTracks as $sc): ?>
     scPlaylist.push({
         url:    '<?php echo htmlspecialchars(addslashes($sc['permalink_url'])); ?>',
         title:  '<?php echo htmlspecialchars(addslashes($sc['title'])); ?>',
