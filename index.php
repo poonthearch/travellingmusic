@@ -486,12 +486,9 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                         <td><?php
                             $lnk = trim($artist['links']);
                             if ($lnk) {
-                                // Treat as URL if it has a dot or slash, otherwise plain text
-                                $href = (strpos($lnk,'http')===0 || strpos($lnk,'/')!==false || strpos($lnk,'.')!==false)
-                                    ? $lnk : '';
-                                if ($href) echo '<a style="color:black" href="'.htmlspecialchars($href).'">'
-                                    .htmlspecialchars($lnk).'</a>';
-                                else echo htmlspecialchars($lnk);
+                                $target = (strpos($lnk, 'http') === 0) ? ' target="_blank"' : '';
+                                echo '<a style="color:black" href="' . htmlspecialchars($lnk) . '"' . $target . '>'
+                                   . htmlspecialchars($lnk) . '</a>';
                             }
                         ?></td>
                         <td><?php echo htmlspecialchars($artist['about']); ?></td>
