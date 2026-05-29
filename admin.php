@@ -788,23 +788,14 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
         // SOUNDCLOUD
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         elseif ($page === 'soundcloud'):
-        $ytdlpOk  = (bool)ytdlpBin();
-        $ffmpegOk = ffmpegAvailable();
+        $curlOk = function_exists('curl_init');
         ?>
         <h1>SoundCloud Profiles</h1>
 
-        <?php if (!$ytdlpOk): ?>
-        <div class="msg err">
-            <strong>yt-dlp not found.</strong> Install it on the server so that track syncing works:<br>
-            <code>pip install yt-dlp</code> &nbsp;or&nbsp; <code>pip3 install yt-dlp</code>
-        </div>
-        <?php elseif (!$ffmpegOk): ?>
-        <div class="msg" style="border-color:#888;background:#fffbe6">
-            <strong>ffmpeg not found.</strong> Tracks will download but may not convert to MP3.
-            Install ffmpeg for best compatibility.
-        </div>
+        <?php if (!$curlOk): ?>
+        <div class="msg err"><strong>PHP curl extension not enabled.</strong> Enable it in php.ini: <code>extension=curl</code></div>
         <?php else: ?>
-        <div class="msg ok">yt-dlp and ffmpeg found — ready to sync &amp; download.</div>
+        <div class="msg ok">Ready — tracks download via PHP/curl, no extra software needed.</div>
         <?php endif; ?>
 
         <!-- Add profile -->
