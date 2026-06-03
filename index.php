@@ -437,20 +437,20 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                             <?php endif; ?>
                             <?php echo htmlspecialchars($sc['title']); ?>
                         </td>
-                        <td><?php echo htmlspecialchars($sc['artist'] ?: $sc['profile_name']); ?></td>
-                        <td></td>
+                        <td><?php echo htmlspecialchars($sc['artist']); ?></td>
+                        <td><?php echo htmlspecialchars($sc['release_date'] ?? ''); ?></td>
                         <td>
                             <?php if ($sc['local_filename']): ?>
                             <button class="play-btn" onclick="playLocal(
                                 'uploads/sc_music/<?php echo htmlspecialchars($sc['local_filename']); ?>',
                                 '<?php echo htmlspecialchars(addslashes($sc['title'])); ?>',
-                                '<?php echo htmlspecialchars(addslashes($sc['artist'] ?: $sc['profile_name'])); ?>'
+                                '<?php echo htmlspecialchars(addslashes($sc['artist'])); ?>'
                             )">Play</button>
                             <?php else: ?>
                             <button class="play-btn" onclick="playSC(
                                 '<?php echo htmlspecialchars(addslashes($sc['permalink_url'])); ?>',
                                 '<?php echo htmlspecialchars(addslashes($sc['title'])); ?>',
-                                '<?php echo htmlspecialchars(addslashes($sc['artist'] ?: $sc['profile_name'])); ?>'
+                                '<?php echo htmlspecialchars(addslashes($sc['artist'])); ?>'
                             )">Play</button>
                             <?php endif; ?>
                         </td>
@@ -563,7 +563,7 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                     <?php foreach ($scTrackExternal as $sc): ?>
                     <tr>
                         <td><?php echo htmlspecialchars($sc['title']); ?></td>
-                        <td><?php echo htmlspecialchars($sc['artist'] ?: $sc['profile_name']); ?></td>
+                        <td><?php echo htmlspecialchars($sc['artist']); ?></td>
                         <td>
                             <?php if ($sc['artwork_url']): ?>
                             <img class="thumb"

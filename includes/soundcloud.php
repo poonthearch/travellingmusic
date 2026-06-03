@@ -110,10 +110,10 @@ function scResolveUser(string $username, string $clientId): ?array {
 }
 
 function scGetUserTracks(string $userId, string $clientId, int $limit = 200): array {
+    // No representation=compact — we need full data including publisher_metadata
     $url = 'https://api-v2.soundcloud.com/users/' . $userId . '/tracks?' . http_build_query([
         'client_id'           => $clientId,
         'limit'               => min($limit, 200),
-        'representation'      => 'compact',
         'linked_partitioning' => 1,
     ]);
     $data = scGetJson($url);
@@ -124,12 +124,29 @@ function scGetUserTracks(string $userId, string $clientId, int $limit = 200): ar
         if (($t['kind'] ?? '') !== 'track') continue;
         $art = $t['artwork_url'] ?? '';
         if ($art) $art = str_replace('-large.', '-t300x300.', $art);
+
+        // Artist: prefer publisher_metadata.artist, then user full_name, then username
+        $pm     = $t['publisher_metadata'] ?? [];
+        $artist = trim($pm['artist'] ?? '')
+               ?: trim($t['user']['full_name'] ?? '')
+               ?: ($t['user']['username'] ?? '');
+
+        // Release date: prefer explicit release_date, fall back to created_at (upload date)
+        $rawDate = $t['release_date'] ?? $t['created_at'] ?? '';
+        $releaseDate = '';
+        if ($rawDate) {
+            // Convert ISO-8601 "2024-03-15T00:00:00Z" → "15/03/24"
+            $ts = strtotime($rawDate);
+            if ($ts !== false) $releaseDate = date('d/m/y', $ts);
+        }
+
         $out[] = [
             'sc_track_id'   => (string)($t['id'] ?? ''),
-            'title'         => $t['title']               ?? 'Untitled',
-            'artist'        => $t['user']['username']    ?? '',
+            'title'         => $t['title']        ?? 'Untitled',
+            'artist'        => $artist,
             'artwork_url'   => $art,
-            'permalink_url' => $t['permalink_url']       ?? '',
+            'permalink_url' => $t['permalink_url'] ?? '',
+            'release_date'  => $releaseDate,
             'downloadable'  => !empty($t['downloadable']),
         ];
     }
@@ -203,11 +220,11 @@ function syncSoundCloudProfile(int $profileId): array {
 
     $checkStmt  = $db->prepare("SELECT id FROM soundcloud_tracks WHERE sc_track_id = ?");
     $updateStmt = $db->prepare(
-        "UPDATE soundcloud_tracks SET title=?, artist=?, artwork_url=?, permalink_url=?, local_filename=? WHERE sc_track_id=?"
+        "UPDATE soundcloud_tracks SET title=?, artist=?, artwork_url=?, permalink_url=?, release_date=?, local_filename=? WHERE sc_track_id=?"
     );
     $insertStmt = $db->prepare(
-        "INSERT INTO soundcloud_tracks (profile_id, sc_track_id, title, artist, artwork_url, permalink_url, local_filename)
-         VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO soundcloud_tracks (profile_id, sc_track_id, title, artist, artwork_url, permalink_url, release_date, local_filename)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     );
 
     foreach ($tracks as $t) {
@@ -238,13 +255,13 @@ function syncSoundCloudProfile(int $profileId): array {
         if ($checkStmt->fetchColumn()) {
             $updateStmt->execute([
                 $t['title'], $t['artist'], $t['artwork_url'],
-                $t['permalink_url'], $localFile, $t['sc_track_id'],
+                $t['permalink_url'], $t['release_date'], $localFile, $t['sc_track_id'],
             ]);
             $updated++;
         } else {
             $insertStmt->execute([
                 $profileId, $t['sc_track_id'], $t['title'], $t['artist'],
-                $t['artwork_url'], $t['permalink_url'], $localFile,
+                $t['artwork_url'], $t['permalink_url'], $t['release_date'], $localFile,
             ]);
             $added++;
         }
