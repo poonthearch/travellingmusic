@@ -497,12 +497,21 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                     <tr>
                         <td><?php echo htmlspecialchars($artist['name']); ?></td>
                         <td><?php
-                            $lnk = trim($artist['links']);
-                            if ($lnk) {
-                                $href = preg_match('#^(https?://|//|/|#|mailto:)#i', $lnk) ? $lnk : $_sitePath . '/' . $lnk;
-                                $target = (strpos($lnk, 'http') === 0) ? ' target="_blank"' : '';
-                                echo '<a style="color:black" href="' . htmlspecialchars($href) . '"' . $target . '>'
-                                   . htmlspecialchars($lnk) . '</a>';
+                            $rawLinks = trim($artist['links']);
+                            $parsed   = $rawLinks ? json_decode($rawLinks, true) : null;
+                            if (is_array($parsed)) {
+                                foreach ($parsed as $_lnk) {
+                                    $_u = trim($_lnk['url']  ?? '');
+                                    $_n = trim($_lnk['name'] ?? $_u);
+                                    if (!$_u) continue;
+                                    $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $_u) ? $_u : $_sitePath . '/' . $_u;
+                                    $_tgt  = (strpos($_u, 'http') === 0) ? ' target="_blank"' : '';
+                                    echo '<a style="color:black;margin-right:6px" href="' . htmlspecialchars($_href) . '"' . $_tgt . '>' . htmlspecialchars($_n) . '</a>';
+                                }
+                            } elseif ($rawLinks) {
+                                $href   = preg_match('#^(https?://|//|/|#|mailto:)#i', $rawLinks) ? $rawLinks : $_sitePath . '/' . $rawLinks;
+                                $target = (strpos($rawLinks, 'http') === 0) ? ' target="_blank"' : '';
+                                echo '<a style="color:black" href="' . htmlspecialchars($href) . '"' . $target . '>' . htmlspecialchars($rawLinks) . '</a>';
                             }
                         ?></td>
                         <td><?php echo htmlspecialchars($artist['about']); ?></td>
@@ -544,11 +553,23 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                             <?php endif; ?>
                         </td>
                         <td>
-                            <?php if ($g['about']): ?>
-                            <?php $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $g['about']) ? $g['about'] : $_sitePath . '/' . $g['about']; ?>
-                            <?php $_atgt = (strpos($g['about'], 'http') === 0) ? ' target="_blank"' : ''; ?>
-                            <a style="color:black" href="<?php echo htmlspecialchars($_href); ?>"<?php echo $_atgt; ?>><?php echo htmlspecialchars($g['about']); ?></a>
-                            <?php endif; ?>
+                            <?php
+                            $_glinks = json_decode($g['links'] ?? '[]', true);
+                            if (!empty($_glinks) && is_array($_glinks)):
+                                foreach ($_glinks as $_lnk):
+                                    $_u = trim($_lnk['url']  ?? '');
+                                    $_n = trim($_lnk['name'] ?? $_u);
+                                    if (!$_u) continue;
+                                    $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $_u) ? $_u : $_sitePath . '/' . $_u;
+                                    $_tgt  = (strpos($_u, 'http') === 0) ? ' target="_blank"' : '';
+                                    echo '<a style="color:black;margin-right:6px" href="' . htmlspecialchars($_href) . '"' . $_tgt . '>' . htmlspecialchars($_n) . '</a>';
+                                endforeach;
+                            elseif ($g['about']):
+                                $_href = preg_match('#^(https?://|//|/|#|mailto:)#i', $g['about']) ? $g['about'] : $_sitePath . '/' . $g['about'];
+                                $_atgt = (strpos($g['about'], 'http') === 0) ? ' target="_blank"' : '';
+                                echo '<a style="color:black" href="' . htmlspecialchars($_href) . '"' . $_atgt . '>' . htmlspecialchars($g['about']) . '</a>';
+                            endif;
+                            ?>
                         </td>
                         <td>
                             <button class="play-btn" onclick="playLocal(
