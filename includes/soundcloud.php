@@ -29,6 +29,7 @@ function scGetJson(string $url): ?array {
 }
 
 function scDownloadBinary(string $url, string $destPath): bool {
+    if (!$url) return false;
     $fh = fopen($destPath, 'wb');
     if (!$fh) return false;
 
@@ -39,6 +40,10 @@ function scDownloadBinary(string $url, string $destPath): bool {
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS      => 10,
         CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        CURLOPT_HTTPHEADER     => [
+            'Referer: https://soundcloud.com/',
+            'Origin: https://soundcloud.com/',
+        ],
         CURLOPT_SSL_VERIFYPEER => true,
     ]);
     curl_exec($ch);
@@ -50,6 +55,14 @@ function scDownloadBinary(string $url, string $destPath): bool {
         @unlink($destPath);
         return false;
     }
+    // Verify the file is audio (not an HTML/JSON error page)
+    $magic = file_get_contents($destPath, false, null, 0, 4);
+    if ($magic === false) { @unlink($destPath); return false; }
+    $isAudio = (substr($magic, 0, 3) === 'ID3')                      // ID3v2-tagged MP3
+            || (ord($magic[0]) === 0xFF && ord($magic[1]) >= 0xE0)   // MPEG frame sync
+            || (substr($magic, 0, 4) === 'ftyp')                     // M4A/AAC
+            || (substr($magic, 0, 4) === 'OggS');                    // OGG
+    if (!$isAudio) { @unlink($destPath); return false; }
     return true;
 }
 
@@ -162,10 +175,15 @@ function scGetDownloadUrl(string $trackId, string $clientId): string {
 
 // Returns the 128 kbps MP3 progressive stream URL (works for all public tracks)
 function scGetStreamUrl(string $trackId, string $clientId): string {
+    // Try v2 streams endpoint
     $data = scGetJson('https://api-v2.soundcloud.com/tracks/' . $trackId
                     . '/streams?client_id=' . urlencode($clientId));
-    // Prefer progressive mp3 stream, fall back to 128k http url
-    return $data['http_mp3_128_url'] ?? $data['preview_mp3_128_url'] ?? '';
+    $url = $data['http_mp3_128_url'] ?? $data['preview_mp3_128_url'] ?? '';
+    if ($url) return $url;
+
+    // Fallback: v1 API stream (redirects directly to CDN, works for all public tracks)
+    return 'https://api.soundcloud.com/tracks/' . $trackId
+         . '/stream?client_id=' . urlencode($clientId);
 }
 
 // ─── Download directory ───────────────────────────────────────────────────────

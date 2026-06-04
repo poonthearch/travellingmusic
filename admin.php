@@ -39,6 +39,18 @@ function uploadFile(string $field, string $dir, array $allowed): array {
     return ['ok' => true, 'filename' => $name];
 }
 
+function parseLinksPost(): string {
+    $names = $_POST['link_name'] ?? [];
+    $urls  = $_POST['link_url']  ?? [];
+    $links = [];
+    for ($i = 0; $i < count($urls); $i++) {
+        $u = trim($urls[$i]  ?? '');
+        $n = trim($names[$i] ?? '');
+        if ($u) $links[] = ['name' => ($n ?: $u), 'url' => $u];
+    }
+    return json_encode($links, JSON_UNESCAPED_UNICODE);
+}
+
 // ─── routing & actions ──────────────────────────────────────────────────────
 
 $page    = $_GET['page']   ?? 'dashboard';
@@ -74,12 +86,12 @@ if ($page === 'login') {
 
         if ($action === 'add') {
             $db->prepare("INSERT INTO artists (name,links,about,sort_order) VALUES (?,?,?,?)")
-               ->execute([trim($_POST['name']),trim($_POST['links']),trim($_POST['about']),(int)$_POST['sort_order']]);
+               ->execute([trim($_POST['name']),parseLinksPost(),trim($_POST['about']),(int)$_POST['sort_order']]);
             $msg = 'Artist added.';
 
         } elseif ($action === 'edit') {
             $db->prepare("UPDATE artists SET name=?,links=?,about=?,sort_order=? WHERE id=?")
-               ->execute([trim($_POST['name']),trim($_POST['links']),trim($_POST['about']),(int)$_POST['sort_order'],(int)$_POST['id']]);
+               ->execute([trim($_POST['name']),parseLinksPost(),trim($_POST['about']),(int)$_POST['sort_order'],(int)$_POST['id']]);
             $msg = 'Artist updated.';
 
         } elseif ($action === 'delete') {
@@ -157,8 +169,8 @@ if ($page === 'login') {
             if (!$mp3['ok']) { $msg = 'MP3 upload error: '.$mp3['error']; $msgType='err'; }
             else {
                 $art = uploadFile('artwork', __DIR__ . '/uploads/guests', ['jpg','jpeg','png','webp','gif']);
-                $db->prepare("INSERT INTO guest_releases (track_id,artist_name,artwork_filename,about,mp3_filename,sort_order) VALUES (?,?,?,?,?,?)")
-                   ->execute([trim($_POST['track_id']),trim($_POST['artist_name']),$art['ok']?$art['filename']:'',trim($_POST['about']),$mp3['filename'],(int)$_POST['sort_order']]);
+                $db->prepare("INSERT INTO guest_releases (track_id,artist_name,artwork_filename,about,links,mp3_filename,sort_order) VALUES (?,?,?,?,?,?,?)")
+                   ->execute([trim($_POST['track_id']),trim($_POST['artist_name']),$art['ok']?$art['filename']:'',trim($_POST['about']),parseLinksPost(),$mp3['filename'],(int)$_POST['sort_order']]);
                 $msg = 'Guest release added.';
             }
 
@@ -167,8 +179,8 @@ if ($page === 'login') {
             $art = uploadFile('artwork', __DIR__ . '/uploads/guests', ['jpg','jpeg','png','webp','gif']);
             $mp3file = $mp3['ok'] ? $mp3['filename'] : trim($_POST['existing_mp3']);
             $artfile = $art['ok'] ? $art['filename'] : trim($_POST['existing_artwork']);
-            $db->prepare("UPDATE guest_releases SET track_id=?,artist_name=?,artwork_filename=?,about=?,mp3_filename=?,sort_order=? WHERE id=?")
-               ->execute([trim($_POST['track_id']),trim($_POST['artist_name']),$artfile,trim($_POST['about']),$mp3file,(int)$_POST['sort_order'],(int)$_POST['id']]);
+            $db->prepare("UPDATE guest_releases SET track_id=?,artist_name=?,artwork_filename=?,about=?,links=?,mp3_filename=?,sort_order=? WHERE id=?")
+               ->execute([trim($_POST['track_id']),trim($_POST['artist_name']),$artfile,trim($_POST['about']),parseLinksPost(),$mp3file,(int)$_POST['sort_order'],(int)$_POST['id']]);
             $msg = 'Guest release updated.';
 
         } elseif ($action === 'delete') {
@@ -518,7 +530,10 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
                 <input type="hidden" name="action" value="add">
                 <div class="field-row">
                     <div class="field"><label>Name</label><input type="text" name="name" required></div>
-                    <div class="field"><label>Links</label><input type="text" name="links" placeholder="https://..."></div>
+                    <div class="field"><label>Links</label>
+                        <div id="lr-new-a"></div>
+                        <button type="button" class="btn sm" onclick="addLinkRow('lr-new-a')" style="margin-top:4px">+ Add link</button>
+                    </div>
                     <div class="field" style="flex:.3"><label>Order</label><input type="number" name="sort_order" value="0" min="0"></div>
                 </div>
                 <div class="field"><label>About</label><textarea name="about"></textarea></div>
@@ -552,7 +567,18 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
                         <input type="hidden" name="id" value="<?php echo $r['id']; ?>">
                         <div class="field-row">
                             <div class="field"><label>Name</label><input type="text" name="name" value="<?php echo htmlspecialchars($r['name']); ?>" required></div>
-                            <div class="field"><label>Links</label><input type="text" name="links" value="<?php echo htmlspecialchars($r['links']); ?>"></div>
+                            <div class="field"><label>Links</label>
+                                <div id="lra<?php echo $r['id']; ?>">
+                                <?php foreach (json_decode($r['links'] ?: '[]', true) ?: [] as $_lnk): ?>
+                                <div style="display:flex;gap:6px;margin-bottom:5px;align-items:center">
+                                    <input type="text" name="link_name[]" value="<?php echo htmlspecialchars($_lnk['name']??''); ?>" placeholder="Label" style="width:90px;border:1px solid #000;padding:5px 7px;font-family:inherit;font-size:13px">
+                                    <input type="text" name="link_url[]" value="<?php echo htmlspecialchars($_lnk['url']??''); ?>" placeholder="URL" style="flex:1;border:1px solid #000;padding:5px 7px;font-family:inherit;font-size:13px">
+                                    <button type="button" onclick="this.parentElement.remove()" class="btn sm danger">×</button>
+                                </div>
+                                <?php endforeach; ?>
+                                </div>
+                                <button type="button" class="btn sm" onclick="addLinkRow('lra<?php echo $r['id']; ?>')" style="margin-top:4px">+ Add link</button>
+                            </div>
                             <div class="field" style="flex:.3"><label>Order</label><input type="number" name="sort_order" value="<?php echo $r['sort_order']; ?>" min="0"></div>
                         </div>
                         <div class="field"><label>About</label><textarea name="about"><?php echo htmlspecialchars($r['about']); ?></textarea></div>
@@ -725,7 +751,11 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
                     <div class="field"><label>Artist Name</label><input type="text" name="artist_name" required></div>
                     <div class="field" style="flex:.3"><label>Order</label><input type="number" name="sort_order" value="0" min="0"></div>
                 </div>
-                <div class="field"><label>About / Link (URL shown as "details")</label><input type="text" name="about" placeholder="https://..."></div>
+                <div class="field"><label>About / Description</label><input type="text" name="about" placeholder="Description or notes"></div>
+                <div class="field"><label>Links (displayed as buttons on site)</label>
+                    <div id="lr-new-g"></div>
+                    <button type="button" class="btn sm" onclick="addLinkRow('lr-new-g')" style="margin-top:4px">+ Add link</button>
+                </div>
                 <div class="field-row">
                     <div class="field"><label>MP3 file</label><input type="file" name="mp3" accept=".mp3" required></div>
                     <div class="field"><label>Artwork (jpg/png)</label><input type="file" name="artwork" accept=".jpg,.jpeg,.png,.webp"></div>
@@ -766,7 +796,19 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
                             <div class="field"><label>Artist Name</label><input type="text" name="artist_name" value="<?php echo htmlspecialchars($r['artist_name']); ?>" required></div>
                             <div class="field" style="flex:.3"><label>Order</label><input type="number" name="sort_order" value="<?php echo $r['sort_order']; ?>" min="0"></div>
                         </div>
-                        <div class="field"><label>About / Link</label><input type="text" name="about" value="<?php echo htmlspecialchars($r['about']); ?>"></div>
+                        <div class="field"><label>About / Description</label><input type="text" name="about" value="<?php echo htmlspecialchars($r['about']); ?>"></div>
+                        <div class="field"><label>Links</label>
+                            <div id="lrg<?php echo $r['id']; ?>">
+                            <?php foreach (json_decode($r['links'] ?: '[]', true) ?: [] as $_lnk): ?>
+                            <div style="display:flex;gap:6px;margin-bottom:5px;align-items:center">
+                                <input type="text" name="link_name[]" value="<?php echo htmlspecialchars($_lnk['name']??''); ?>" placeholder="Label" style="width:90px;border:1px solid #000;padding:5px 7px;font-family:inherit;font-size:13px">
+                                <input type="text" name="link_url[]" value="<?php echo htmlspecialchars($_lnk['url']??''); ?>" placeholder="URL" style="flex:1;border:1px solid #000;padding:5px 7px;font-family:inherit;font-size:13px">
+                                <button type="button" onclick="this.parentElement.remove()" class="btn sm danger">×</button>
+                            </div>
+                            <?php endforeach; ?>
+                            </div>
+                            <button type="button" class="btn sm" onclick="addLinkRow('lrg<?php echo $r['id']; ?>')" style="margin-top:4px">+ Add link</button>
+                        </div>
                         <div class="field-row">
                             <div class="field"><label>New MP3 (blank = keep)</label><input type="file" name="mp3" accept=".mp3"></div>
                             <div class="field"><label>New Artwork (blank = keep)</label><input type="file" name="artwork" accept=".jpg,.jpeg,.png,.webp"></div>
@@ -971,6 +1013,16 @@ function toggleEdit(id) {
     const row = document.getElementById(id);
     if (!row) return;
     row.style.display = (row.style.display === 'table-row') ? 'none' : 'table-row';
+}
+function addLinkRow(containerId) {
+    var c = document.getElementById(containerId);
+    if (!c) return;
+    var d = document.createElement('div');
+    d.style.cssText = 'display:flex;gap:6px;margin-bottom:5px;align-items:center';
+    d.innerHTML = '<input type="text" name="link_name[]" placeholder="Label (SC, IG…)" style="width:90px;border:1px solid #000;padding:5px 7px;font-family:inherit;font-size:13px">'
+                + '<input type="text" name="link_url[]" placeholder="https://..." style="flex:1;border:1px solid #000;padding:5px 7px;font-family:inherit;font-size:13px">'
+                + '<button type="button" onclick="this.parentElement.remove()" style="border:1px solid #c00;color:#c00;background:#fff;cursor:pointer;padding:4px 8px;font-family:inherit;font-size:12px">×</button>';
+    c.appendChild(d);
 }
 </script>
 </body>

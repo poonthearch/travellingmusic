@@ -103,6 +103,10 @@ function initSchema(PDO $db): void {
         $db->exec("ALTER TABLE soundcloud_tracks ADD COLUMN release_date TEXT NOT NULL DEFAULT ''");
     } catch (Exception $e) { /* already exists */ }
 
+    try {
+        $db->exec("ALTER TABLE guest_releases ADD COLUMN links TEXT NOT NULL DEFAULT ''");
+    } catch (Exception $e) { /* already exists */ }
+
     // Insert defaults only once
     $check = $db->query("SELECT COUNT(*) FROM settings")->fetchColumn();
     if ($check == 0) {

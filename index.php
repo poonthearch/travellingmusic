@@ -432,10 +432,11 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                     <?php foreach ($scTrackMusic as $sc): ?>
                     <tr>
                         <td>
+                            <a href="<?php echo htmlspecialchars($sc['permalink_url']); ?>" target="_blank" style="color:black;text-decoration:none">
                             <?php if ($sc['artwork_url']): ?>
                             <img class="thumb" src="<?php echo htmlspecialchars($sc['artwork_url']); ?>" alt="" style="vertical-align:middle;margin-right:4px">
                             <?php endif; ?>
-                            <?php echo htmlspecialchars($sc['title']); ?>
+                            <?php echo htmlspecialchars($sc['title']); ?></a>
                         </td>
                         <td><?php echo htmlspecialchars($sc['artist']); ?></td>
                         <td><?php echo htmlspecialchars($sc['release_date'] ?? ''); ?></td>
@@ -562,7 +563,7 @@ $siteTitle = getSetting('site_title') ?: 'travelling music™';
                     <!-- SoundCloud tracks assigned to external section -->
                     <?php foreach ($scTrackExternal as $sc): ?>
                     <tr>
-                        <td><?php echo htmlspecialchars($sc['title']); ?></td>
+                        <td><a href="<?php echo htmlspecialchars($sc['permalink_url']); ?>" target="_blank" style="color:black;text-decoration:none"><?php echo htmlspecialchars($sc['title']); ?></a></td>
                         <td><?php echo htmlspecialchars($sc['artist']); ?></td>
                         <td>
                             <?php if ($sc['artwork_url']): ?>
@@ -850,8 +851,8 @@ function playLocal(url, title, artist) {
     setupAnalyser();
     audioEl.src = url;
 
-    if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume().then(function() { startPlay(); });
+    if (audioCtx) {
+        audioCtx.resume().then(function() { startPlay(); }).catch(function() { startPlay(); });
     } else {
         startPlay();
     }
@@ -972,13 +973,24 @@ foreach ($legacyGuests as $g) {
         'artist' => $g['artist_name'],
     );
 }
+foreach ($allScTracks as $sc) {
+    if ($sc['local_filename']) {
+        $jsLocal[] = array(
+            'url'    => 'uploads/sc_music/' . $sc['local_filename'],
+            'title'  => $sc['title'],
+            'artist' => $sc['artist'],
+        );
+    }
+}
 $jsSC = array();
 foreach ($allScTracks as $sc) {
-    $jsSC[] = array(
-        'url'    => $sc['permalink_url'],
-        'title'  => $sc['title'],
-        'artist' => $sc['artist'] ?: $sc['profile_name'],
-    );
+    if (!$sc['local_filename']) {
+        $jsSC[] = array(
+            'url'    => $sc['permalink_url'],
+            'title'  => $sc['title'],
+            'artist' => $sc['artist'],
+        );
+    }
 }
 ?>
 localPlaylist = <?php echo json_encode($jsLocal, JSON_UNESCAPED_UNICODE); ?>;
