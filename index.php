@@ -872,10 +872,7 @@ function playLocal(url, title, artist) {
     playlistMode = 'local';
 
     // Set src BEFORE setupAnalyser so createMediaElementSource gets a non-empty element.
-    // audioEl.load() forces the browser to acknowledge the new source.
-    audioEl.pause();
     audioEl.src = url;
-    audioEl.load();
     setupAnalyser();
 
     if (audioCtx) {
@@ -1036,7 +1033,9 @@ audioEl.addEventListener('play',   function() { isPlaying = true;  updateIcon();
 audioEl.addEventListener('pause',  function() { isPlaying = false; updateIcon(); });
 audioEl.addEventListener('error',  function() {
     isPlaying = false; updateIcon();
-    console.warn('Audio load error', audioEl.error, audioEl.src);
+    var code = audioEl.error ? audioEl.error.code : '?';
+    console.warn('Audio load error code=' + code, audioEl.src);
+    document.getElementById('track-name').textContent = '[load error ' + code + '] ' + document.getElementById('track-name').textContent;
 });
 audioEl.volume = 0.7;
 

@@ -959,7 +959,11 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
                 <td><?php echo htmlspecialchars($t['artist']); ?></td>
                 <td><?php echo htmlspecialchars($t['profile_username']); ?></td>
                 <td style="font-size:11px;color:<?php echo $t['local_filename'] ? '#060' : '#c00'; ?>">
-                    <?php echo $t['local_filename'] ? '&#10003; ' . htmlspecialchars($t['local_filename']) : '&#10007; not downloaded'; ?>
+                    <?php if ($t['local_filename']): ?>
+                    &#10003; <a href="uploads/sc_music/<?php echo htmlspecialchars($t['local_filename']); ?>" target="_blank" title="Test: open audio directly"><?php echo htmlspecialchars($t['local_filename']); ?></a>
+                    <?php else: ?>
+                    &#10007; not downloaded
+                    <?php endif; ?>
                 </td>
                 <td>
                     <form method="post" style="display:inline" onsubmit="return confirm('Remove this track?')">

@@ -59,14 +59,16 @@ function scDownloadBinary(string $url, string $destPath): bool {
         @unlink($destPath);
         return false;
     }
-    // Verify the file is audio (not an HTML/JSON error page)
-    $magic = file_get_contents($destPath, false, null, 0, 4);
-    if ($magic === false) { @unlink($destPath); return false; }
-    $isAudio = (substr($magic, 0, 3) === 'ID3')                      // ID3v2-tagged MP3
-            || (ord($magic[0]) === 0xFF && ord($magic[1]) >= 0xE0)   // MPEG frame sync
-            || (substr($magic, 0, 4) === 'ftyp')                     // M4A/AAC
-            || (substr($magic, 0, 4) === 'OggS');                    // OGG
+    // Verify the file is audio (not an HTML/JSON error page).
+    // Read 12 bytes so we can check MPEG-4 'ftyp' box at offset 4.
+    $magic = file_get_contents($destPath, false, null, 0, 12);
+    if ($magic === false || strlen($magic) < 4) { @unlink($destPath); return false; }
+    $isAudio = (substr($magic, 0, 3) === 'ID3')                      // MP3 with ID3v2 tag
+            || (ord($magic[0]) === 0xFF && ord($magic[1]) >= 0xE0)   // MPEG / ADTS-AAC frame
+            || (strlen($magic) >= 8 && substr($magic, 4, 4) === 'ftyp') // MP4/M4A (ftyp at offset 4)
+            || (substr($magic, 0, 4) === 'OggS');                    // Ogg
     if (!$isAudio) { @unlink($destPath); return false; }
+    @chmod($destPath, 0644); // ensure web server can read the file
     return true;
 }
 
@@ -235,7 +237,10 @@ function scGetStreamUrl(string $trackId, string $clientId): string {
 
 function scDownloadDir(): string {
     $dir = dirname(__DIR__) . '/uploads/sc_music';
-    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+        @chmod($dir, 0755);
+    }
     return $dir;
 }
 
@@ -278,6 +283,9 @@ function syncSoundCloudProfile(int $profileId): array {
     $added    = 0;
     $updated  = 0;
     $dlFailed = 0;
+
+    // Fix permissions on any already-downloaded files (in case they were created with 0600)
+    foreach (glob($dir . '/*.mp3') as $f) { @chmod($f, 0644); }
 
     set_time_limit(600);
 
