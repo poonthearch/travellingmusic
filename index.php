@@ -856,7 +856,9 @@ function startPlay() {
             isPlaying = true;
             updateIcon();
         }).catch(function(err) {
-            console.warn('play() failed:', err);
+            console.warn('play() rejected:', err);
+            isPlaying = false;
+            updateIcon();
         });
     } else {
         isPlaying = true;
@@ -869,8 +871,12 @@ function playLocal(url, title, artist) {
     currentMode  = 'local';
     playlistMode = 'local';
 
-    setupAnalyser();
+    // Set src BEFORE setupAnalyser so createMediaElementSource gets a non-empty element.
+    // audioEl.load() forces the browser to acknowledge the new source.
+    audioEl.pause();
     audioEl.src = url;
+    audioEl.load();
+    setupAnalyser();
 
     if (audioCtx) {
         audioCtx.resume().then(function() { startPlay(); }).catch(function() { startPlay(); });
@@ -1028,6 +1034,10 @@ audioEl.addEventListener('timeupdate', function() {
 audioEl.addEventListener('ended',  function() { isPlaying = false; updateIcon(); nextTrack(); });
 audioEl.addEventListener('play',   function() { isPlaying = true;  updateIcon(); });
 audioEl.addEventListener('pause',  function() { isPlaying = false; updateIcon(); });
+audioEl.addEventListener('error',  function() {
+    isPlaying = false; updateIcon();
+    console.warn('Audio load error', audioEl.error, audioEl.src);
+});
 audioEl.volume = 0.7;
 
 // Modal
