@@ -1,4 +1,7 @@
 <?php
+ob_start();
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
 session_start();
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/soundcloud.php';
@@ -11,12 +14,14 @@ function isAuth(): bool {
 
 function requireAuth(): void {
     if (!isAuth()) {
+        if (ob_get_level()) ob_end_clean();
         header('Location: admin.php?page=login');
         exit;
     }
 }
 
 function redirect(string $to): void {
+    if (ob_get_level()) ob_end_clean();
     header('Location: ' . $to);
     exit;
 }
