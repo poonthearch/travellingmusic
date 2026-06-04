@@ -10,8 +10,12 @@ function scGet(string $url): string {
         CURLOPT_TIMEOUT        => 30,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS      => 8,
-        CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        CURLOPT_HTTPHEADER     => ['Accept: */*', 'Accept-Language: en-US,en;q=0.9'],
+        CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        CURLOPT_HTTPHEADER     => [
+            'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language: en-US,en;q=0.9',
+            'Referer: https://soundcloud.com/',
+        ],
         CURLOPT_ENCODING       => '',
         CURLOPT_SSL_VERIFYPEER => true,
     ]);
@@ -67,8 +71,10 @@ function scDownloadBinary(string $url, string $destPath): bool {
 }
 
 // ─── client_id extraction ─────────────────────────────────────────────────────
-// SC embeds a client_id in their JS bundles. We parse it out the same way
-// yt-dlp and other tools do — no additional software needed.
+// SC embeds a client_id in their JS bundles and page HTML. We use three methods:
+// 1. __sc_hydration JSON embedded directly in the HTML
+// 2. JS bundle scan (multiple URL patterns, multiple regex patterns)
+// 3. Fallback: scan the /discover page too
 
 function scExtractClientId(): string {
     $cacheFile = dirname(__DIR__) . '/data/sc_cid.txt';
@@ -76,39 +82,66 @@ function scExtractClientId(): string {
     // Return cached value if less than 6 hours old
     if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 21600) {
         $cached = trim(file_get_contents($cacheFile));
-        if (preg_match('/^[a-zA-Z0-9]{16,}$/', $cached)) return $cached;
+        if (preg_match('/^[a-zA-Z0-9_-]{16,}$/', $cached)) return $cached;
     }
 
-    // Fetch SC homepage to find JS bundle URLs
-    $html = scGet('https://soundcloud.com/');
-    if (!$html) return '';
+    // client_id regex patterns (SC changes their JS structure periodically)
+    $cidPatterns = [
+        '/[,{(;=]client_id\s*:\s*"([a-zA-Z0-9_-]{16,64})"/',
+        "/[,{(;=]client_id\\s*:\\s*'([a-zA-Z0-9_-]{16,64})'/",
+        '/"client_id"\s*:\s*"([a-zA-Z0-9_-]{16,64})"/',
+        '/client_id=([a-zA-Z0-9_-]{16,64})[&"\'\\s,}]/',
+        '/[,{(;=]clientId\s*:\s*"([a-zA-Z0-9_-]{16,64})"/',
+        "/[,{(;=]clientId\\s*:\\s*'([a-zA-Z0-9_-]{16,64})'/",
+        '/[^a-z]client_id["\']\s*[=:]\s*["\']([a-zA-Z0-9_-]{16,64})["\']/',
+    ];
 
-    // Collect all JS bundle URLs from <script src="...">
-    preg_match_all(
-        '#<script[^>]+src=["\']?(https://a-v2\.sndcdn\.com/assets/[^"\'>\s]+\.js)["\']?#i',
-        $html, $m
-    );
-    $jsUrls = array_unique($m[1] ?? []);
+    $pages = ['https://soundcloud.com/', 'https://soundcloud.com/discover'];
 
-    // client_id is usually in one of the later bundles — try in reverse
-    foreach (array_reverse($jsUrls) as $jsUrl) {
-        $js = scGet($jsUrl);
-        if (!$js) continue;
+    foreach ($pages as $pageUrl) {
+        $html = scGet($pageUrl);
+        if (!$html) continue;
 
-        // Known patterns where SC embeds client_id in their minified JS
-        foreach ([
-            '/[,{(]client_id:"([a-zA-Z0-9_-]{20,50})"/',
-            "/[,{(]client_id:'([a-zA-Z0-9_-]{20,50})'/",
-            '/client_id=([a-zA-Z0-9_-]{20,50})[&,}"\']/',
-        ] as $pat) {
-            if (preg_match($pat, $js, $mm)) {
-                $cid = $mm[1];
-                file_put_contents($cacheFile, $cid);
-                return $cid;
+        // Method 1: __sc_hydration JSON (SoundCloud embeds config in page HTML)
+        if (preg_match('/window\.__sc_hydration\s*=\s*(\[[\s\S]{10,100000}?\]);/', $html, $hm)) {
+            $hydration = @json_decode($hm[1], true);
+            if (is_array($hydration)) {
+                foreach ($hydration as $item) {
+                    foreach (['clientId', 'client_id'] as $k) {
+                        $c = $item['data'][$k] ?? '';
+                        if ($c && preg_match('/^[a-zA-Z0-9_-]{16,}$/', $c)) {
+                            file_put_contents($cacheFile, $c);
+                            return $c;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Method 2: Scan JS bundle files linked from the page
+        preg_match_all(
+            '#\bsrc=["\']?(https://[a-z0-9._-]*sndcdn\.com/assets/[^\s"\'<>]+\.js)["\']?#i',
+            $html, $m
+        );
+        $jsUrls = array_unique($m[1] ?? []);
+
+        foreach (array_reverse($jsUrls) as $jsUrl) {
+            $js = scGet($jsUrl);
+            if (!$js) continue;
+            foreach ($cidPatterns as $pat) {
+                if (preg_match($pat, $js, $mm)) {
+                    $cid = trim($mm[1]);
+                    if (preg_match('/^[a-zA-Z0-9_-]{16,}$/', $cid)) {
+                        file_put_contents($cacheFile, $cid);
+                        return $cid;
+                    }
+                }
             }
         }
     }
 
+    // Clear stale cache on failure so the next request retries immediately
+    if (file_exists($cacheFile)) @unlink($cacheFile);
     return '';
 }
 

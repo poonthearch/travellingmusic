@@ -836,13 +836,29 @@ if (isAuth() && $page !== 'login' && $page !== 'logout') {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         elseif ($page === 'soundcloud'):
         $curlOk = function_exists('curl_init');
+        // Check cached client_id status
+        $cidCache = dirname(__DIR__) . '/data/sc_cid.txt'; // won't exist in sub-dir context; use correct path
+        $cidCache = __DIR__ . '/../data/sc_cid.txt';
+        $cachedCid = '';
+        $cidAge = -1;
+        if (file_exists($cidCache)) {
+            $cachedCid = trim(file_get_contents($cidCache));
+            $cidAge = (int)((time() - filemtime($cidCache)) / 60); // minutes ago
+        }
         ?>
         <h1>SoundCloud Profiles</h1>
 
         <?php if (!$curlOk): ?>
         <div class="msg err"><strong>PHP curl extension not enabled.</strong> Enable it in php.ini: <code>extension=curl</code></div>
         <?php else: ?>
-        <div class="msg ok">Ready — tracks download via PHP/curl, no extra software needed.</div>
+        <div class="msg ok">
+            Ready — tracks download via PHP/curl, no extra software needed.
+            <?php if ($cachedCid): ?>
+            | client_id cached: <code><?php echo htmlspecialchars(substr($cachedCid,0,8)); ?>…</code> (<?php echo $cidAge; ?> min ago)
+            <?php else: ?>
+            | <em>client_id not yet cached — will be fetched on next Sync.</em>
+            <?php endif; ?>
+        </div>
         <?php endif; ?>
 
         <!-- Add profile -->
