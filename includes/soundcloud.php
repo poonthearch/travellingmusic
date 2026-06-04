@@ -103,7 +103,7 @@ function scExtractClientId(): string {
         if (!$html) continue;
 
         // Method 1: __sc_hydration JSON (SoundCloud embeds config in page HTML)
-        if (preg_match('/window\.__sc_hydration\s*=\s*(\[[\s\S]{10,100000}?\]);/', $html, $hm)) {
+        if (preg_match('/window\.__sc_hydration\s*=\s*(\[[\s\S]+?\]);/', $html, $hm)) {
             $hydration = @json_decode($hm[1], true);
             if (is_array($hydration)) {
                 foreach ($hydration as $item) {
@@ -206,15 +206,27 @@ function scGetDownloadUrl(string $trackId, string $clientId): string {
     return $data['redirectUri'] ?? '';
 }
 
-// Returns the 128 kbps MP3 progressive stream URL (works for all public tracks)
+// Returns a directly downloadable MP3 URL for any public track.
+// SC now serves most streams via signed transcoding URLs rather than http_mp3_128_url.
 function scGetStreamUrl(string $trackId, string $clientId): string {
-    // Try v2 streams endpoint
-    $data = scGetJson('https://api-v2.soundcloud.com/tracks/' . $trackId
-                    . '/streams?client_id=' . urlencode($clientId));
-    $url = $data['http_mp3_128_url'] ?? $data['preview_mp3_128_url'] ?? '';
+    // Method 1: fetch full track info → find progressive MP3 transcoding → resolve to CDN URL
+    $track = scGetJson('https://api-v2.soundcloud.com/tracks/' . $trackId
+                     . '?client_id=' . urlencode($clientId));
+    foreach ($track['media']['transcodings'] ?? [] as $tc) {
+        if (($tc['format']['protocol'] ?? '') === 'progressive'
+            && strpos($tc['format']['mime_type'] ?? '', 'mpeg') !== false) {
+            $resolved = scGetJson(($tc['url'] ?? '') . '?client_id=' . urlencode($clientId));
+            if (!empty($resolved['url'])) return $resolved['url'];
+        }
+    }
+
+    // Method 2: /streams endpoint (older field, sometimes still present)
+    $streams = scGetJson('https://api-v2.soundcloud.com/tracks/' . $trackId
+                       . '/streams?client_id=' . urlencode($clientId));
+    $url = ($streams['http_mp3_128_url'] ?? $streams['preview_mp3_128_url'] ?? '');
     if ($url) return $url;
 
-    // Fallback: v1 API stream (redirects directly to CDN, works for all public tracks)
+    // Method 3: v1 API stream (last resort — may redirect to HLS, handled by downloader)
     return 'https://api.soundcloud.com/tracks/' . $trackId
          . '/stream?client_id=' . urlencode($clientId);
 }
